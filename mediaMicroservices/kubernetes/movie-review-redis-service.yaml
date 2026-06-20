@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    kompose.cmd: kompose convert -f docker-kompose.yml -o kubernetes/ -n media
+    kompose.version: 1.38.0 (a8f5d1cbd)
+  labels:
+    io.kompose.service: movie-review-redis
+  name: movie-review-redis
+  namespace: media
+spec:
+  ports:
+    - name: "6379"
+      port: 6379
+      targetPort: 6379
+  selector:
+    io.kompose.service: movie-review-redis

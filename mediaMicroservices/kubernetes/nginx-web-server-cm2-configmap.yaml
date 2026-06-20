@@ -1,0 +1,23 @@
+apiVersion: v1
+data:
+  jaeger-config.json: |-
+    {
+      "service_name": "nginx",
+      "diabled": false,
+      "reporter": {
+        "logSpans": true,
+        "localAgentHostPort": "jaeger:6831"
+      },
+      "sampler": {
+        "type": "const",
+        "param": "1"
+      }
+    }
+kind: ConfigMap
+metadata:
+  annotations:
+    use-subpath: "true"
+  labels:
+    io.kompose.service: nginx-web-server
+  name: nginx-web-server-cm2
+  namespace: media

@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    kompose.cmd: kompose convert -f docker-kompose.yml -o kubernetes/ -n media
+    kompose.version: 1.38.0 (a8f5d1cbd)
+  labels:
+    io.kompose.service: compose-review-memcached
+  name: compose-review-memcached
+  namespace: media
+spec:
+  ports:
+    - name: "11211"
+      port: 11211
+      targetPort: 11211
+  selector:
+    io.kompose.service: compose-review-memcached

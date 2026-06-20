@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    kompose.cmd: kompose convert -f docker-kompose.yml -o kubernetes/ -n media
+    kompose.version: 1.38.0 (a8f5d1cbd)
+  labels:
+    io.kompose.service: compose-review-memcached
+  name: compose-review-memcached
+  namespace: media
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: compose-review-memcached
+  template:
+    metadata:
+      annotations:
+        kompose.cmd: kompose convert -f docker-kompose.yml -o kubernetes/ -n media
+        kompose.version: 1.38.0 (a8f5d1cbd)
+      labels:
+        io.kompose.service: compose-review-memcached
+    spec:
+      containers:
+        - image: memcached
+          name: compose-review-memcached
+          ports:
+            - containerPort: 11211
+              protocol: TCP
+      hostname: compose-review-memcached
+      restartPolicy: Always

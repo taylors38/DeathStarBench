@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    kompose.cmd: kompose convert -f docker-kompose.yml -o kubernetes/ -n media
+    kompose.version: 1.38.0 (a8f5d1cbd)
+  labels:
+    io.kompose.service: rating-redis
+  name: rating-redis
+  namespace: media
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: rating-redis
+  template:
+    metadata:
+      annotations:
+        kompose.cmd: kompose convert -f docker-kompose.yml -o kubernetes/ -n media
+        kompose.version: 1.38.0 (a8f5d1cbd)
+      labels:
+        io.kompose.service: rating-redis
+    spec:
+      containers:
+        - image: redis
+          name: rating-redis
+          ports:
+            - containerPort: 6379
+              protocol: TCP
+      hostname: rating-redis
+      restartPolicy: Always

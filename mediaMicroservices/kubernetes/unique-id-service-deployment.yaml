@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    kompose.cmd: kompose convert -f docker-kompose.yml -o kubernetes/ -n media
+    kompose.version: 1.38.0 (a8f5d1cbd)
+  labels:
+    io.kompose.service: unique-id-service
+  name: unique-id-service
+  namespace: media
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: unique-id-service
+  template:
+    metadata:
+      annotations:
+        kompose.cmd: kompose convert -f docker-kompose.yml -o kubernetes/ -n media
+        kompose.version: 1.38.0 (a8f5d1cbd)
+      labels:
+        io.kompose.service: unique-id-service
+    spec:
+      containers:
+        - command:
+            - UniqueIdService
+          image: yg397/media-microservices
+          name: unique-id-service
+          ports:
+            - containerPort: 9090
+              protocol: TCP
+      hostname: unique-id-service
+      restartPolicy: Always

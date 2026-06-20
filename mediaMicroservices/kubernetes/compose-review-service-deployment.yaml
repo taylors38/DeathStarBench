@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    kompose.cmd: kompose convert -f docker-kompose.yml -o kubernetes/ -n media
+    kompose.version: 1.38.0 (a8f5d1cbd)
+  labels:
+    io.kompose.service: compose-review-service
+  name: compose-review-service
+  namespace: media
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: compose-review-service
+  template:
+    metadata:
+      annotations:
+        kompose.cmd: kompose convert -f docker-kompose.yml -o kubernetes/ -n media
+        kompose.version: 1.38.0 (a8f5d1cbd)
+      labels:
+        io.kompose.service: compose-review-service
+    spec:
+      containers:
+        - command:
+            - ComposeReviewService
+          image: yg397/media-microservices
+          name: compose-review-service
+          ports:
+            - containerPort: 9090
+              protocol: TCP
+      hostname: compose-review-service
+      restartPolicy: Always

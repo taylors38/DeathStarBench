@@ -29,14 +29,19 @@ spec:
           ports:
             - containerPort: 8080
               protocol: TCP
+          env:
+            - name: fqdn_suffix
+              value: ".media.svc.cluster.local"
           volumeMounts:
             #- mountPath: /usr/local/openresty/nginx/lua-scripts
             #  name: nginx-web-server-cm0
             - mountPath: /usr/local/openresty/nginx/lua-scripts
               name: lua-scripts
+                #- mountPath: /usr/local/openresty/nginx/conf/nginx.conf
+                #  name: nginx-web-server-cm1
+                #  subPath: nginx.conf
             - mountPath: /usr/local/openresty/nginx/conf/nginx.conf
-              name: nginx-web-server-cm1
-              subPath: nginx.conf
+              name: nginx-config
             - mountPath: /usr/local/openresty/nginx/jaeger-config.json
               name: nginx-web-server-cm2
               subPath: jaeger-config.json
@@ -49,12 +54,16 @@ spec:
           hostPath:
             path: /home/taylor/DeathStarBench/mediaMicroservices/nginx-web-server/lua-scripts
             type: Directory
-        - configMap:
-            items:
-              - key: nginx.conf
-                path: nginx.conf
-            name: nginx-web-server-cm1
-          name: nginx-web-server-cm1
+        - name: nginx-config
+          hostPath:
+            path: /home/taylor/DeathStarBench/mediaMicroservices/nginx-web-server/conf/nginx.conf
+            type: File
+              #- configMap:
+              #    items:
+              #      - key: nginx.conf
+              #        path: nginx.conf
+              #    name: nginx-web-server-cm1
+              #  name: nginx-web-server-cm1
         - configMap:
             items:
               - key: jaeger-config.json

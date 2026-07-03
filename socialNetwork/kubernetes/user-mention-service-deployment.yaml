@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    kompose.cmd: kompose convert -f kompose-docker.yml -o kubernetes/
+    kompose.version: 1.38.0 (a8f5d1cbd)
+  labels:
+    io.kompose.service: user-mention-service
+  name: user-mention-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: user-mention-service
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations:
+        kompose.cmd: kompose convert -f kompose-docker.yml -o kubernetes/
+        kompose.version: 1.38.0 (a8f5d1cbd)
+      labels:
+        io.kompose.service: user-mention-service
+    spec:
+      containers:
+        - command:
+            - UserMentionService
+          image: deathstarbench/social-network-microservices:latest
+          name: user-mention-service
+          ports:
+            - containerPort: 9090
+              protocol: TCP
+          volumeMounts:
+            - mountPath: /social-network-microservices/config
+              name: user-mention-service-cm0
+      hostname: user-mention-service
+      restartPolicy: Always
+      volumes:
+        - configMap:
+            name: user-mention-service-cm0
+          name: user-mention-service-cm0

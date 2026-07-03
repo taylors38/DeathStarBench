@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    kompose.cmd: kompose convert -f kompose-docker.yml -o kubernetes/
+    kompose.version: 1.38.0 (a8f5d1cbd)
+  labels:
+    io.kompose.service: media-service
+  name: media-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: media-service
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations:
+        kompose.cmd: kompose convert -f kompose-docker.yml -o kubernetes/
+        kompose.version: 1.38.0 (a8f5d1cbd)
+      labels:
+        io.kompose.service: media-service
+    spec:
+      containers:
+        - command:
+            - MediaService
+          image: deathstarbench/social-network-microservices:latest
+          name: media-service
+          ports:
+            - containerPort: 9090
+              protocol: TCP
+          volumeMounts:
+            - mountPath: /social-network-microservices/config
+              name: media-service-cm0
+      hostname: media-service
+      restartPolicy: Always
+      volumes:
+        - configMap:
+            name: media-service-cm0
+          name: media-service-cm0

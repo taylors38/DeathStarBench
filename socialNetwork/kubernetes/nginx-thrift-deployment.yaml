@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    kompose.cmd: kompose convert -f kompose-docker.yml -o kubernetes/
+    kompose.version: 1.38.0 (a8f5d1cbd)
+  labels:
+    io.kompose.service: nginx-thrift
+  name: nginx-thrift
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: nginx-thrift
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations:
+        kompose.cmd: kompose convert -f kompose-docker.yml -o kubernetes/
+        kompose.version: 1.38.0 (a8f5d1cbd)
+      labels:
+        io.kompose.service: nginx-thrift
+    spec:
+      containers:
+        - image: yg397/openresty-thrift:xenial
+          name: nginx-thrift
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          env:
+            - name: fqdn_suffix
+              value: ".default.svc.cluster.local"
+          volumeMounts:
+            - mountPath: /usr/local/openresty/nginx/lua-scripts
+              name: lua-scripts
+            - mountPath: /usr/local/openresty/nginx/pages
+              name: nginx-thrift-cm1
+            - mountPath: /usr/local/openresty/nginx/conf/nginx.conf
+              name: nginx-thrift-cm2
+              subPath: nginx.conf
+            - mountPath: /usr/local/openresty/nginx/jaeger-config.json
+              name: nginx-thrift-cm3
+              subPath: jaeger-config.json
+            - mountPath: /gen-lua
+              name: nginx-thrift-cm4
+            - mountPath: /usr/local/openresty/lualib/thrift
+              name: nginx-thrift-cm5
+      hostname: nginx-thrift
+      restartPolicy: Always
+      volumes:
+        - name: lua-scripts
+          hostPath:
+            path: /home/taylor/DeathStarBench/socialNetwork/nginx-web-server/lua-scripts
+            type: Directory
+        - configMap:
+            name: nginx-thrift-cm1
+          name: nginx-thrift-cm1
+        - configMap:
+            items:
+              - key: nginx.conf
+                path: nginx.conf
+            name: nginx-thrift-cm2
+          name: nginx-thrift-cm2
+        - configMap:
+            items:
+              - key: jaeger-config.json
+                path: jaeger-config.json
+            name: nginx-thrift-cm3
+          name: nginx-thrift-cm3
+        - configMap:
+            name: nginx-thrift-cm4
+          name: nginx-thrift-cm4
+        - configMap:
+            name: nginx-thrift-cm5
+          name: nginx-thrift-cm5

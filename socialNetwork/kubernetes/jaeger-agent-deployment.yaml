@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    kompose.cmd: kompose convert -f kompose-docker.yml -o kubernetes/
+    kompose.version: 1.38.0 (a8f5d1cbd)
+  labels:
+    io.kompose.service: jaeger-agent
+  name: jaeger-agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: jaeger-agent
+  template:
+    metadata:
+      annotations:
+        kompose.cmd: kompose convert -f kompose-docker.yml -o kubernetes/
+        kompose.version: 1.38.0 (a8f5d1cbd)
+      labels:
+        io.kompose.service: jaeger-agent
+    spec:
+      containers:
+        - env:
+            - name: COLLECTOR_ZIPKIN_HTTP_PORT
+              value: "9411"
+          image: jaegertracing/all-in-one:latest
+          name: jaeger-agent
+          ports:
+            - containerPort: 16686
+              protocol: TCP
+      restartPolicy: Always

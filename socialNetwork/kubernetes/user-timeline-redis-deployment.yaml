@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    kompose.cmd: kompose convert -f kompose-docker.yml -o kubernetes/
+    kompose.version: 1.38.0 (a8f5d1cbd)
+  labels:
+    io.kompose.service: user-timeline-redis
+  name: user-timeline-redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.kompose.service: user-timeline-redis
+  template:
+    metadata:
+      annotations:
+        kompose.cmd: kompose convert -f kompose-docker.yml -o kubernetes/
+        kompose.version: 1.38.0 (a8f5d1cbd)
+      labels:
+        io.kompose.service: user-timeline-redis
+    spec:
+      containers:
+        - image: redis
+          name: user-timeline-redis
+          ports:
+            - containerPort: 6379
+              protocol: TCP
+      hostname: user-timeline-redis
+      restartPolicy: Always

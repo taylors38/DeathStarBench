@@ -1,0 +1,3024 @@
+apiVersion: v1
+data:
+  GenericObjectPool.lua: |
+    --
+    --Author: xiajun
+    --Date: 20151120
+    --
+    local Object = require 'Object'
+    local RpcClientFactory = require 'RpcClientFactory'
+    local ngx = ngx
+    local GenericObjectPool = Object:new({
+        __type = 'GenericObjectPool',
+        maxTotal = 100,
+        maxIdleTime = 10000,
+        timeout = 10000
+        })
+    function GenericObjectPool:init(conf)
+    end
+    --
+    --从连接池获取rpc客户端
+    --ngx nginx容器变量
+    --
+    function GenericObjectPool:connection(thriftClient,ip,port)
+        local ssl = ngx.shared.config:get("ssl")
+        local client = RpcClientFactory:createClient(thriftClient,ip,port,self.timeout,ssl)
+        return client
+    end
+    --
+    --回收连接资源到连接池
+    --client rpc客户端对象
+    --
+    function GenericObjectPool:returnConnection(client)
+        if(client ~= nil)then
+            if (client.iprot.trans.trans:isOpen())then
+                client.iprot.trans.trans:setKeepAlive(self.maxIdleTime, self.maxTotal)
+            else
+                ngx.log(ngx.ERR,"return rpc client fail, socket close.")
+            end
+        end
+    end
+
+    -- Connection pool size
+    function GenericObjectPool:setMaxTotal(maxTotal)
+        self.maxTotal = maxTotal
+    end
+
+    -- Keep alive timeout
+    function GenericObjectPool:setmaxIdleTime(maxIdleTime)
+        self.maxIdleTime = maxIdleTime
+    end
+
+    -- Keep RPC read/write timeout
+    function GenericObjectPool:setTimeout(timeout)
+        self.timeout = timeout
+    end
+
+    function GenericObjectPool:clear()
+
+    end
+    function GenericObjectPool:remove()
+
+    end
+    return GenericObjectPool
+  Makefile.am: |
+    #
+    # Licensed to the Apache Software Foundation (ASF) under one
+    # or more contributor license agreements. See the NOTICE file
+    # distributed with this work for additional information
+    # regarding copyright ownership. The ASF licenses this file
+    # to you under the Apache License, Version 2.0 (the
+    # "License"); you may not use this file except in compliance
+    # with the License. You may obtain a copy of the License at
+    #
+    #   http://www.apache.org/licenses/LICENSE-2.0
+    #
+    # Unless required by applicable law or agreed to in writing,
+    # software distributed under the License is distributed on an
+    # "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+    # KIND, either express or implied. See the License for the
+    # specific language governing permissions and limitations
+    # under the License.
+    #
+
+    AUTOMAKE_OPTIONS = subdir-objects
+
+    SUBDIRS = .
+
+    lib_LTLIBRARIES = \
+    			libluasocket.la \
+    			libluabpack.la \
+    			libluabitwise.la \
+    			liblualongnumber.la
+
+    libluasocket_la_SOURCES = \
+    			src/luasocket.c \
+    			src/usocket.c
+
+    nobase_include_HEADERS = src/socket.h
+
+    libluasocket_la_CPPFLAGS = $(AM_CPPFLAGS) $(LUA_INCLUDE) -DLUA_COMPAT_MODULE
+    libluasocket_la_LDFLAGS = $(AM_LDFLAGS)
+    libluasocket_la_LIBADD = $(LUA_LIB) -lm
+
+    libluabpack_la_SOURCES = src/luabpack.c
+
+    libluabpack_la_CPPFLAGS = $(AM_CPPFLAGS) $(LUA_INCLUDE) -DLUA_COMPAT_MODULE
+    libluabpack_la_LDFLAGS = $(AM_LDFLAGS)
+    libluabpack_la_LIBADD = liblualongnumber.la $(LUA_LIB) -lm
+
+    libluabitwise_la_SOURCES = src/luabitwise.c
+
+    libluabitwise_la_CPPFLAGS = $(AM_CPPFLAGS) $(LUA_INCLUDE) -DLUA_COMPAT_MODULE
+    libluabitwise_la_LDFLAGS = $(AM_LDFLAGS)
+    libluabitwise_la_LIBADD = $(LUA_LIB) -lm
+
+    liblualongnumber_la_SOURCES = \
+    		src/lualongnumber.c \
+    		src/longnumberutils.c
+
+    liblualongnumber_la_CPPFLAGS = $(AM_CPPFLAGS) $(LUA_INCLUDE) -DLUA_COMPAT_MODULE
+    liblualongnumber_la_LDFLAGS = $(AM_LDFLAGS)
+    liblualongnumber_la_LIBADD = $(LUA_LIB) -lm
+
+    EXTRA_DIST = \
+    		coding_standards.md \
+    		TBinaryProtocol.lua \
+    		TBufferedTransport.lua \
+    		TCompactProtocol.lua \
+    		TFramedTransport.lua \
+    		Thrift.lua \
+    		THttpTransport.lua \
+    		TJsonProtocol.lua \
+    		TMemoryBuffer.lua \
+    		TProtocol.lua \
+    		TServer.lua \
+    		TSocket.lua \
+    		TTransport.lua
+  Object.lua: |
+    --
+    ----Author: xiajun
+    ----Date: 20151120
+    ----
+    local function ttype(obj)
+        if type(obj) == 'table' and obj.__type and type(obj.__type) == 'string' then
+            return obj.__type
+        end
+        return type(obj)
+    end
+    local function __obj_index(self, key)
+        local obj = rawget(self, key)
+        if obj ~=nil then
+            return obj
+        end
+        local p = rawget(self,'__parent')
+        if p then
+            return __obj_index(p,key)
+        end
+        return nil
+    end
+
+    local Object = {
+        __type = 'Object',
+        __mt = {
+            __index = __obj_index
+        }
+    }
+    function Object:new(init_obj)
+        local obj = {}
+        if ttype(obj) == 'table' then
+            obj = init_obj
+        end
+        obj.__parent = self
+        setmetatable(obj,Object.__mt)
+        return obj
+    end
+    function Object:ttype()
+        if self and self.__type then
+            return self.__type
+        end
+        return type(self)
+    end
+    return Object
+  RpcClient.lua: |
+    --
+    ----Author: xiajun
+    ----Date: 20151020
+    ----
+    local TSocket = require "TSocket"
+    local TSocketSSL = require "TSocketSSL"
+    local TFramedTransport = require "TFramedTransport"
+    local TBinaryProtocol = require "TBinaryProtocol"
+    local Object = require "Object"
+
+    local RpcClient = Object:new({
+    	__type = 'RpcClient',
+    })
+
+    --初始化RPC连接
+    function RpcClient:init(ip,port,timeout,ssl)
+    	if (ssl == true) then
+    		socket = TSocketSSL:new{
+    			host = ip,
+    			port = port
+    		 }
+    	else
+    		socket = TSocket:new{
+    			host = ip,
+    			port = port
+    		}
+    	end
+    	socket:setTimeout(timeout)
+    	local transport = TFramedTransport:new{
+    		trans = socket
+    	}
+    	local protocol = TBinaryProtocol:new{
+    		trans = transport
+    	}
+    	transport:open()
+    	return protocol;
+    end
+    --创建RPC客户端
+    function RpcClient:createClient(thriftClient)end
+
+    return RpcClient
+  RpcClientFactory.lua: |
+    --
+    ----Author: xiajun
+    ----Date: 20151020
+    ----
+    local RpcClient = require "RpcClient"
+    --local TestServiceClient = require "resty.thrift.thrift-idl.lua_test_TestService"
+    local RpcClientFactory = RpcClient:new({
+    	__type = 'Client'
+    })
+    function RpcClientFactory:createClient(thriftClient, ip, port, timeout, ssl)
+        local protocol = self:init(ip, port, timeout, ssl)
+        local client = thriftClient:new{
+            iprot = protocol,
+            oprot = protocol
+        }
+        return client
+    end
+    return RpcClientFactory
+  TBinaryProtocol.lua: |
+    --
+    -- Licensed to the Apache Software Foundation (ASF) under one
+    -- or more contributor license agreements. See the NOTICE file
+    -- distributed with this work for additional information
+    -- regarding copyright ownership. The ASF licenses this file
+    -- to you under the Apache License, Version 2.0 (the
+    -- "License"); you may not use this file except in compliance
+    -- with the License. You may obtain a copy of the License at
+    --
+    --   http://www.apache.org/licenses/LICENSE-2.0
+    --
+    -- Unless required by applicable law or agreed to in writing,
+    -- software distributed under the License is distributed on an
+    -- "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+    -- KIND, either express or implied. See the License for the
+    -- specific language governing permissions and limitations
+    -- under the License.
+    --
+
+    local TProtocol = require('TProtocol')
+    local libluabpack = require('libluabpack')
+    local libluabitwise = require('libluabitwise')
+    local Thrift = require 'Thrift'
+    local TType = Thrift.TType
+    local __TObject = Thrift.__TObject
+    local ttype = Thrift.ttype
+    local terror = Thrift.terror
+    local TProtocolException = TProtocol.TProtocolException
+    local TProtocolBase = TProtocol.TProtocolBase
+    local TProtocolFactory = TProtocol.TProtocolFactory
+
+
+    local TBinaryProtocol = __TObject.new(TProtocolBase, {
+      __type = 'TBinaryProtocol',
+      VERSION_MASK = -65536, -- 0xffff0000
+      VERSION_1    = -2147418112, -- 0x80010000
+      TYPE_MASK    = 0x000000ff,
+      strictRead   = false,
+      strictWrite  = true
+    })
+
+    function TBinaryProtocol:writeMessageBegin(name, ttype, seqid)
+      if self.strictWrite then
+        self:writeI32(libluabitwise.bor(TBinaryProtocol.VERSION_1, ttype))
+        self:writeString(name)
+        self:writeI32(seqid)
+      else
+        self:writeString(name)
+        self:writeByte(ttype)
+        self:writeI32(seqid)
+      end
+    end
+
+    function TBinaryProtocol:writeMessageEnd()
+    end
+
+    function TBinaryProtocol:writeStructBegin(name)
+    end
+
+    function TBinaryProtocol:writeStructEnd()
+    end
+
+    function TBinaryProtocol:writeFieldBegin(name, ttype, id)
+      self:writeByte(ttype)
+      self:writeI16(id)
+    end
+
+    function TBinaryProtocol:writeFieldEnd()
+    end
+
+    function TBinaryProtocol:writeFieldStop()
+      self:writeByte(TType.STOP);
+    end
+
+    function TBinaryProtocol:writeMapBegin(ktype, vtype, size)
+      self:writeByte(ktype)
+      self:writeByte(vtype)
+      self:writeI32(size)
+    end
+
+    function TBinaryProtocol:writeMapEnd()
+    end
+
+    function TBinaryProtocol:writeListBegin(etype, size)
+      self:writeByte(etype)
+      self:writeI32(size)
+    end
+
+    function TBinaryProtocol:writeListEnd()
+    end
+
+    function TBinaryProtocol:writeSetBegin(etype, size)
+      self:writeByte(etype)
+      self:writeI32(size)
+    end
+
+    function TBinaryProtocol:writeSetEnd()
+    end
+
+    function TBinaryProtocol:writeBool(bool)
+      if bool then
+        self:writeByte(1)
+      else
+        self:writeByte(0)
+      end
+    end
+
+    function TBinaryProtocol:writeByte(byte)
+      local buff = libluabpack.bpack('c', byte)
+      self.trans:write(buff)
+    end
+
+    function TBinaryProtocol:writeI16(i16)
+      local buff = libluabpack.bpack('s', i16)
+      self.trans:write(buff)
+    end
+
+    function TBinaryProtocol:writeI32(i32)
+      local buff = libluabpack.bpack('i', i32)
+      self.trans:write(buff)
+    end
+
+    function TBinaryProtocol:writeI64(i64)
+      local buff = libluabpack.bpack('l', i64)
+      self.trans:write(buff)
+    end
+
+    function TBinaryProtocol:writeDouble(dub)
+      local buff = libluabpack.bpack('d', dub)
+      self.trans:write(buff)
+    end
+
+    function TBinaryProtocol:writeString(str)
+      -- Should be utf-8
+      self:writeI32(string.len(str))
+      self.trans:write(str)
+    end
+
+    function TBinaryProtocol:readMessageBegin()
+      local sz, ttype, name, seqid = self:readI32()
+      if sz < 0 then
+        local version = libluabitwise.band(sz, TBinaryProtocol.VERSION_MASK)
+        if version ~= TBinaryProtocol.VERSION_1 then
+          terror(TProtocolException:new{
+            message = 'Bad version in readMessageBegin: ' .. sz
+          })
+        end
+        ttype = libluabitwise.band(sz, TBinaryProtocol.TYPE_MASK)
+        name = self:readString()
+        seqid = self:readI32()
+      else
+        if self.strictRead then
+          terror(TProtocolException:new{message = 'No protocol version header'})
+        end
+        name = self.trans:readAll(sz)
+        ttype = self:readByte()
+        seqid = self:readI32()
+      end
+      return name, ttype, seqid
+    end
+
+    function TBinaryProtocol:readMessageEnd()
+    end
+
+    function TBinaryProtocol:readStructBegin()
+      return nil
+    end
+
+    function TBinaryProtocol:readStructEnd()
+    end
+
+    function TBinaryProtocol:readFieldBegin()
+      local ttype = self:readByte()
+      if ttype == TType.STOP then
+        return nil, ttype, 0
+      end
+      local id = self:readI16()
+      return nil, ttype, id
+    end
+
+    function TBinaryProtocol:readFieldEnd()
+    end
+
+    function TBinaryProtocol:readMapBegin()
+      local ktype = self:readByte()
+      local vtype = self:readByte()
+      local size = self:readI32()
+      return ktype, vtype, size
+    end
+
+    function TBinaryProtocol:readMapEnd()
+    end
+
+    function TBinaryProtocol:readListBegin()
+      local etype = self:readByte()
+      local size = self:readI32()
+      return etype, size
+    end
+
+    function TBinaryProtocol:readListEnd()
+    end
+
+    function TBinaryProtocol:readSetBegin()
+      local etype = self:readByte()
+      local size = self:readI32()
+      return etype, size
+    end
+
+    function TBinaryProtocol:readSetEnd()
+    end
+
+    function TBinaryProtocol:readBool()
+      local byte = self:readByte()
+      if byte == 0 then
+        return false
+      end
+      return true
+    end
+
+    function TBinaryProtocol:readByte()
+      local buff = self.trans:readAll(1)
+      local val = libluabpack.bunpack('c', buff)
+      return val
+    end
+
+    function TBinaryProtocol:readI16()
+      local buff = self.trans:readAll(2)
+      local val = libluabpack.bunpack('s', buff)
+      return val
+    end
+
+    function TBinaryProtocol:readI32()
+      local buff = self.trans:readAll(4)
+      local val = libluabpack.bunpack('i', buff)
+      return val
+    end
+
+    function TBinaryProtocol:readI64()
+      local buff = self.trans:readAll(8)
+      local val = libluabpack.bunpack('l', buff)
+      return val
+    end
+
+    function TBinaryProtocol:readDouble()
+      local buff = self.trans:readAll(8)
+      local val = libluabpack.bunpack('d', buff)
+      return val
+    end
+
+    function TBinaryProtocol:readString()
+      local len = self:readI32()
+      local str = self.trans:readAll(len)
+      return str
+    end
+
+    local TBinaryProtocolFactory = TProtocolFactory:new{
+      __type = 'TBinaryProtocolFactory',
+      strictRead = false
+    }
+
+    function TBinaryProtocolFactory:getProtocol(trans)
+      -- TODO Enforce that this must be a transport class (ie not a bool)
+      if not trans then
+        terror(TProtocolException:new{
+          message = 'Must supply a transport to ' .. ttype(self)
+        })
+      end
+      return TBinaryProtocol:new{
+        trans = trans,
+        strictRead = self.strictRead,
+        strictWrite = true
+      }
+    end
+
+    return TBinaryProtocol
+  TBufferedTransport.lua: |
+    --
+    -- Licensed to the Apache Software Foundation (ASF) under one
+    -- or more contributor license agreements. See the NOTICE file
+    -- distributed with this work for additional information
+    -- regarding copyright ownership. The ASF licenses this file
+    -- to you under the Apache License, Version 2.0 (the
+    -- "License"); you may not use this file except in compliance
+    -- with the License. You may obtain a copy of the License at
+    --
+    --   http://www.apache.org/licenses/LICENSE-2.0
+    --
+    -- Unless required by applicable law or agreed to in writing,
+    -- software distributed under the License is distributed on an
+    -- "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+    -- KIND, either express or implied. See the License for the
+    -- specific language governing permissions and limitations
+    -- under the License.
+    --
+
+    local TTransport = require 'TTransport'
+    local TTransportException = TTransport.TTransportException
+    local TTransportBase = TTransport.TTransportBase
+    local TTransportFactoryBase = TTransport.TTransportFactoryBase
+    local Thrift = require 'Thrift'
+    local ttype = Thrift.ttype
+    local terror = Thrift.terror
+
+    local TBufferedTransport = TTransportBase:new{
+      __type = 'TBufferedTransport',
+      rBufSize = 2048,
+      wBufSize = 2048,
+      wBuf = '',
+      rBuf = ''
+    }
+
+    function TBufferedTransport:new(obj)
+      if ttype(obj) ~= 'table' then
+        error(ttype(self) .. 'must be initialized with a table')
+      end
+
+      -- Ensure a transport is provided
+      if not obj.trans then
+        error('You must provide ' .. ttype(self) .. ' with a trans')
+      end
+
+      return TTransportBase.new(self, obj)
+    end
+
+    function TBufferedTransport:isOpen()
+      return self.trans:isOpen()
+    end
+
+    function TBufferedTransport:open()
+      return self.trans:open()
+    end
+
+    function TBufferedTransport:close()
+      return self.trans:close()
+    end
+
+    function TBufferedTransport:read(len)
+      return self.trans:read(len)
+    end
+
+    function TBufferedTransport:readAll(len)
+      return self.trans:readAll(len)
+    end
+
+    function TBufferedTransport:write(buf)
+      self.wBuf = self.wBuf .. buf
+      if string.len(self.wBuf) >= self.wBufSize then
+        self.trans:write(self.wBuf)
+        self.wBuf = ''
+      end
+    end
+
+    function TBufferedTransport:flush()
+      if string.len(self.wBuf) > 0 then
+        self.trans:write(self.wBuf)
+        self.wBuf = ''
+      end
+    end
+
+    local TBufferedTransportFactory = TTransportFactoryBase:new{
+      __type = 'TBufferedTransportFactory'
+    }
+
+    function TBufferedTransportFactory:getTransport(trans)
+      if not trans then
+        terror(TTransportException:new{
+          message = 'Must supply a transport to ' .. ttype(self)
+        })
+      end
+      return TBufferedTransport:new{
+        trans = trans
+      }
+    end
+
+    return TBufferedTransport
+  TCompactProtocol.lua: |
+    --
+    -- Licensed to the Apache Software Foundation (ASF) under one
+    -- or more contributor license agreements. See the NOTICE file
+    -- distributed with this work for additional information
+    -- regarding copyright ownership. The ASF licenses this file
+    -- to you under the Apache License, Version 2.0 (the
+    -- "License"); you may not use this file except in compliance
+    -- with the License. You may obtain a copy of the License at
+    --
+    --   http://www.apache.org/licenses/LICENSE-2.0
+    --
+    -- Unless required by applicable law or agreed to in writing,
+    -- software distributed under the License is distributed on an
+    -- "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+    -- KIND, either express or implied. See the License for the
+    -- specific language governing permissions and limitations
+    -- under the License.
+    --
+
+    local TProtocol = require 'TProtocol'
+    local libluabpack = require 'libluabpack'
+    local libluabitwise = require 'libluabitwise'
+    local liblualongnumber = require 'liblualongnumber'
+    local Thrift = require 'Thrift'
+    local TType = Thrift.TType
+    local __TObject = Thrift.__TObject
+    local ttype = Thrift.ttype
+    local terror = Thrift.terror
+    local TProtocolException = TProtocol.TProtocolException
+    local TProtocolBase = TProtocol.TProtocolBase
+    local TProtocolFactory = TProtocol.TProtocolFactory
+
+
+    local TCompactProtocol = __TObject.new(TProtocolBase, {
+      __type = 'TCompactProtocol',
+      COMPACT_PROTOCOL_ID       = 0x82,
+      COMPACT_VERSION           = 1,
+      COMPACT_VERSION_MASK      = 0x1f,
+      COMPACT_TYPE_MASK         = 0xE0,
+      COMPACT_TYPE_BITS         = 0x07,
+      COMPACT_TYPE_SHIFT_AMOUNT = 5,
+
+      -- Used to keep track of the last field for the current and previous structs,
+      -- so we can do the delta stuff.
+      lastField = {},
+      lastFieldId = 0,
+      lastFieldIndex = 1,
+
+      -- If we encounter a boolean field begin, save the TField here so it can
+      -- have the value incorporated.
+      booleanFieldName    = "",
+      booleanFieldId      = 0,
+      booleanFieldPending = false,
+
+      -- If we read a field header, and it's a boolean field, save the boolean
+      -- value here so that readBool can use it.
+      boolValue          = false,
+      boolValueIsNotNull = false,
+    })
+
+    local TCompactType = {
+      COMPACT_BOOLEAN_TRUE  = 0x01,
+      COMPACT_BOOLEAN_FALSE = 0x02,
+      COMPACT_BYTE          = 0x03,
+      COMPACT_I16           = 0x04,
+      COMPACT_I32           = 0x05,
+      COMPACT_I64           = 0x06,
+      COMPACT_DOUBLE        = 0x07,
+      COMPACT_BINARY        = 0x08,
+      COMPACT_LIST          = 0x09,
+      COMPACT_SET           = 0x0A,
+      COMPACT_MAP           = 0x0B,
+      COMPACT_STRUCT        = 0x0C
+    }
+
+    local TTypeToCompactType = {}
+    TTypeToCompactType[TType.STOP]   = TType.STOP
+    TTypeToCompactType[TType.BOOL]   = TCompactType.COMPACT_BOOLEAN_TRUE
+    TTypeToCompactType[TType.BYTE]   = TCompactType.COMPACT_BYTE
+    TTypeToCompactType[TType.I16]    = TCompactType.COMPACT_I16
+    TTypeToCompactType[TType.I32]    = TCompactType.COMPACT_I32
+    TTypeToCompactType[TType.I64]    = TCompactType.COMPACT_I64
+    TTypeToCompactType[TType.DOUBLE] = TCompactType.COMPACT_DOUBLE
+    TTypeToCompactType[TType.STRING] = TCompactType.COMPACT_BINARY
+    TTypeToCompactType[TType.LIST]   = TCompactType.COMPACT_LIST
+    TTypeToCompactType[TType.SET]    = TCompactType.COMPACT_SET
+    TTypeToCompactType[TType.MAP]    = TCompactType.COMPACT_MAP
+    TTypeToCompactType[TType.STRUCT] = TCompactType.COMPACT_STRUCT
+
+    local CompactTypeToTType = {}
+    CompactTypeToTType[TType.STOP]                        = TType.STOP
+    CompactTypeToTType[TCompactType.COMPACT_BOOLEAN_TRUE] = TType.BOOL
+    CompactTypeToTType[TCompactType.COMPACT_BOOLEAN_FALSE] = TType.BOOL
+    CompactTypeToTType[TCompactType.COMPACT_BYTE]         = TType.BYTE
+    CompactTypeToTType[TCompactType.COMPACT_I16]          = TType.I16
+    CompactTypeToTType[TCompactType.COMPACT_I32]          = TType.I32
+    CompactTypeToTType[TCompactType.COMPACT_I64]          = TType.I64
+    CompactTypeToTType[TCompactType.COMPACT_DOUBLE]       = TType.DOUBLE
+    CompactTypeToTType[TCompactType.COMPACT_BINARY]       = TType.STRING
+    CompactTypeToTType[TCompactType.COMPACT_LIST]         = TType.LIST
+    CompactTypeToTType[TCompactType.COMPACT_SET]          = TType.SET
+    CompactTypeToTType[TCompactType.COMPACT_MAP]          = TType.MAP
+    CompactTypeToTType[TCompactType.COMPACT_STRUCT]       = TType.STRUCT
+
+    function TCompactProtocol:resetLastField()
+      self.lastField = {}
+      self.lastFieldId = 0
+      self.lastFieldIndex = 1
+    end
+
+    function TCompactProtocol:packCompactType(ktype, vtype)
+      return libluabitwise.bor(libluabitwise.shiftl(ktype, 4), vtype)
+    end
+
+    function TCompactProtocol:writeMessageBegin(name, ttype, seqid)
+      self:writeByte(TCompactProtocol.COMPACT_PROTOCOL_ID)
+      self:writeByte(libluabpack.packMesgType(TCompactProtocol.COMPACT_VERSION,
+        TCompactProtocol.COMPACT_VERSION_MASK,ttype,
+        TCompactProtocol.COMPACT_TYPE_SHIFT_AMOUNT,
+        TCompactProtocol.COMPACT_TYPE_MASK))
+      self:writeVarint32(seqid)
+      self:writeString(name)
+      self:resetLastField()
+    end
+
+    function TCompactProtocol:writeMessageEnd()
+    end
+
+    function TCompactProtocol:writeStructBegin(name)
+      self.lastFieldIndex = self.lastFieldIndex + 1
+      self.lastField[self.lastFieldIndex] = self.lastFieldId
+      self.lastFieldId = 0
+    end
+
+    function TCompactProtocol:writeStructEnd()
+      self.lastFieldIndex = self.lastFieldIndex - 1
+      self.lastFieldId = self.lastField[self.lastFieldIndex]
+    end
+
+    function TCompactProtocol:writeFieldBegin(name, ttype, id)
+      if ttype == TType.BOOL then
+        self.booleanFieldName = name
+        self.booleanFieldId   = id
+        self.booleanFieldPending = true
+      else
+        self:writeFieldBeginInternal(name, ttype, id, -1)
+      end
+    end
+
+    function TCompactProtocol:writeFieldEnd()
+    end
+
+    function TCompactProtocol:writeFieldStop()
+      self:writeByte(TType.STOP);
+    end
+
+    function TCompactProtocol:writeMapBegin(ktype, vtype, size)
+      if size == 0 then
+        self:writeByte(0)
+      else
+        self:writeVarint32(size)
+        self:writeByte(self:packCompactType(TTypeToCompactType[ktype], TTypeToCompactType[vtype]))
+      end
+    end
+
+    function TCompactProtocol:writeMapEnd()
+    end
+
+    function TCompactProtocol:writeListBegin(etype, size)
+      self:writeCollectionBegin(etype, size)
+    end
+
+    function TCompactProtocol:writeListEnd()
+    end
+
+    function TCompactProtocol:writeSetBegin(etype, size)
+      self:writeCollectionBegin(etype, size)
+    end
+
+    function TCompactProtocol:writeSetEnd()
+    end
+
+    function TCompactProtocol:writeBool(bool)
+      local value = TCompactType.COMPACT_BOOLEAN_FALSE
+      if bool then
+        value = TCompactType.COMPACT_BOOLEAN_TRUE
+      end
+      print(value,self.booleanFieldPending,self.booleanFieldId)
+      if self.booleanFieldPending then
+        self:writeFieldBeginInternal(self.booleanFieldName, TType.BOOL, self.booleanFieldId, value)
+        self.booleanFieldPending = false
+      else
+        self:writeByte(value)
+      end
+    end
+
+    function TCompactProtocol:writeByte(byte)
+      local buff = libluabpack.bpack('c', byte)
+      self.trans:write(buff)
+    end
+
+    function TCompactProtocol:writeI16(i16)
+      self:writeVarint32(libluabpack.i32ToZigzag(i16))
+    end
+
+    function TCompactProtocol:writeI32(i32)
+      self:writeVarint32(libluabpack.i32ToZigzag(i32))
+    end
+
+    function TCompactProtocol:writeI64(i64)
+      self:writeVarint64(libluabpack.i64ToZigzag(i64))
+    end
+
+    function TCompactProtocol:writeDouble(dub)
+      local buff = libluabpack.bpack('d', dub)
+      self.trans:write(buff)
+    end
+
+    function TCompactProtocol:writeString(str)
+      -- Should be utf-8
+      self:writeBinary(str)
+    end
+
+    function TCompactProtocol:writeBinary(str)
+      -- Should be utf-8
+      self:writeVarint32(string.len(str))
+      self.trans:write(str)
+    end
+
+    function TCompactProtocol:writeFieldBeginInternal(name, ttype, id, typeOverride)
+      if typeOverride == -1 then
+        typeOverride = TTypeToCompactType[ttype]
+      end
+      local offset = id - self.lastFieldId
+      if id > self.lastFieldId and offset <= 15 then
+        self:writeByte(libluabitwise.bor(libluabitwise.shiftl(offset, 4), typeOverride))
+      else
+        self:writeByte(typeOverride)
+        self:writeI16(id)
+      end
+      self.lastFieldId = id
+    end
+
+    function TCompactProtocol:writeCollectionBegin(etype, size)
+      if size <= 14 then
+        self:writeByte(libluabitwise.bor(libluabitwise.shiftl(size, 4), TTypeToCompactType[etype]))
+      else
+        self:writeByte(libluabitwise.bor(0xf0, TTypeToCompactType[etype]))
+        self:writeVarint32(size)
+      end
+    end
+
+    function TCompactProtocol:writeVarint32(i32)
+      -- Should be utf-8
+      local str = libluabpack.toVarint32(i32)
+      self.trans:write(str)
+    end
+
+    function TCompactProtocol:writeVarint64(i64)
+      -- Should be utf-8
+      local str = libluabpack.toVarint64(i64)
+      self.trans:write(str)
+    end
+
+    function TCompactProtocol:readMessageBegin()
+      local protocolId = self:readSignByte()
+      if protocolId ~= self.COMPACT_PROTOCOL_ID then
+        terror(TProtocolException:new{
+          message = "Expected protocol id " .. self.COMPACT_PROTOCOL_ID .. " but got " .. protocolId})
+      end
+      local versionAndType = self:readSignByte()
+      local version = libluabitwise.band(versionAndType, self.COMPACT_VERSION_MASK)
+      local ttype = libluabitwise.band(libluabitwise.shiftr(versionAndType,
+        self.COMPACT_TYPE_SHIFT_AMOUNT), self.COMPACT_TYPE_BITS)
+      if version ~= self.COMPACT_VERSION then
+        terror(TProtocolException:new{
+          message = "Expected version " .. self.COMPACT_VERSION .. " but got " .. version})
+      end
+      local seqid = self:readVarint32()
+      local name = self:readString()
+      return name, ttype, seqid
+    end
+
+    function TCompactProtocol:readMessageEnd()
+    end
+
+    function TCompactProtocol:readStructBegin()
+      self.lastField[self.lastFieldIndex] = self.lastFieldId
+      self.lastFieldIndex = self.lastFieldIndex + 1
+      self.lastFieldId = 0
+      return nil
+    end
+
+    function TCompactProtocol:readStructEnd()
+      self.lastFieldIndex = self.lastFieldIndex - 1
+      self.lastFieldId = self.lastField[self.lastFieldIndex]
+    end
+
+    function TCompactProtocol:readFieldBegin()
+      local field_and_ttype = self:readSignByte()
+      local ttype = self:getTType(field_and_ttype)
+      if ttype == TType.STOP then
+        return nil, ttype, 0
+      end
+      -- mask off the 4 MSB of the type header. it could contain a field id delta.
+      local modifier = libluabitwise.shiftr(libluabitwise.band(field_and_ttype, 0xf0), 4)
+      local id = 0
+      if modifier == 0 then
+        id = self:readI16()
+      else
+        id = self.lastFieldId + modifier
+      end
+      if ttype == TType.BOOL then
+        boolValue = libluabitwise.band(field_and_ttype, 0x0f) == TCompactType.COMPACT_BOOLEAN_TRUE
+        boolValueIsNotNull = true
+      end
+      self.lastFieldId = id
+      return nil, ttype, id
+    end
+
+    function TCompactProtocol:readFieldEnd()
+    end
+
+    function TCompactProtocol:readMapBegin()
+      local size = self:readVarint32()
+      if size < 0 then
+        return nil,nil,nil
+      end
+      local kvtype = self:readSignByte()
+      local ktype = self:getTType(libluabitwise.shiftr(kvtype, 4))
+      local vtype = self:getTType(kvtype)
+      return ktype, vtype, size
+    end
+
+    function TCompactProtocol:readMapEnd()
+    end
+
+    function TCompactProtocol:readListBegin()
+      local size_and_type = self:readSignByte()
+      local size = libluabitwise.band(libluabitwise.shiftr(size_and_type, 4), 0x0f)
+      if size == 15 then
+        size = self:readVarint32()
+      end
+      if size < 0 then
+        return nil,nil
+      end
+      local etype = self:getTType(libluabitwise.band(size_and_type, 0x0f))
+      return etype, size
+    end
+
+    function TCompactProtocol:readListEnd()
+    end
+
+    function TCompactProtocol:readSetBegin()
+      return self:readListBegin()
+    end
+
+    function TCompactProtocol:readSetEnd()
+    end
+
+    function TCompactProtocol:readBool()
+      if boolValueIsNotNull then
+        boolValueIsNotNull = true
+        return boolValue
+      end
+      local val = self:readSignByte()
+      if val == TCompactType.COMPACT_BOOLEAN_TRUE then
+        return true
+      end
+      return false
+    end
+
+    function TCompactProtocol:readByte()
+      local buff = self.trans:readAll(1)
+      local val = libluabpack.bunpack('c', buff)
+      return val
+    end
+
+    function TCompactProtocol:readSignByte()
+      local buff = self.trans:readAll(1)
+      local val = libluabpack.bunpack('C', buff)
+      return val
+    end
+
+    function TCompactProtocol:readI16()
+      return self:readI32()
+    end
+
+    function TCompactProtocol:readI32()
+      local v = self:readVarint32()
+      local value = libluabpack.zigzagToI32(v)
+      return value
+    end
+
+    function TCompactProtocol:readI64()
+      local value = self:readVarint64()
+      return value
+    end
+
+    function TCompactProtocol:readDouble()
+      local buff = self.trans:readAll(8)
+      local val = libluabpack.bunpack('d', buff)
+      return val
+    end
+
+    function TCompactProtocol:readString()
+      return self:readBinary()
+    end
+
+    function TCompactProtocol:readBinary()
+      local size = self:readVarint32()
+      if size <= 0 then
+        return ""
+      end
+      return self.trans:readAll(size)
+    end
+
+    function TCompactProtocol:readVarint32()
+      local shiftl = 0
+      local result = 0
+      while true do
+        b = self:readByte()
+        result = libluabitwise.bor(result,
+                 libluabitwise.shiftl(libluabitwise.band(b, 0x7f), shiftl))
+        if libluabitwise.band(b, 0x80) ~= 0x80 then
+          break
+        end
+        shiftl = shiftl + 7
+      end
+      return result
+    end
+
+    function TCompactProtocol:readVarint64()
+      local result = liblualongnumber.new
+      local data = result(0)
+      local shiftl = 0
+      while true do
+        b = self:readByte()
+        endFlag, data = libluabpack.fromVarint64(b, shiftl, data)
+        shiftl = shiftl + 7
+        if endFlag == 0 then
+          break
+        end
+      end
+      return data
+    end
+
+    function TCompactProtocol:getTType(ctype)
+      return CompactTypeToTType[libluabitwise.band(ctype, 0x0f)]
+    end
+
+    local TCompactProtocolFactory = TProtocolFactory:new{
+      __type = 'TCompactProtocolFactory',
+    }
+
+    function TCompactProtocolFactory:getProtocol(trans)
+      -- TODO Enforce that this must be a transport class (ie not a bool)
+      if not trans then
+        terror(TProtocolException:new{
+          message = 'Must supply a transport to ' .. ttype(self)
+        })
+      end
+      return TCompactProtocol:new{
+        trans = trans
+      }
+    end
+  TFramedTransport.lua: |
+    --
+    -- Licensed to the Apache Software Foundation (ASF) under one
+    -- or more contributor license agreements. See the NOTICE file
+    -- distributed with this work for additional information
+    -- regarding copyright ownership. The ASF licenses this file
+    -- to you under the Apache License, Version 2.0 (the
+    -- "License"); you may not use this file except in compliance
+    -- with the License. You may obtain a copy of the License at
+    --
+    --   http://www.apache.org/licenses/LICENSE-2.0
+    --
+    -- Unless required by applicable law or agreed to in writing,
+    -- software distributed under the License is distributed on an
+    -- "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+    -- KIND, either express or implied. See the License for the
+    -- specific language governing permissions and limitations
+    -- under the License.
+    --
+
+    local TTransport = require 'TTransport'
+    local libluabpack = require 'libluabpack'
+    local TProtocol = require 'TProtocol'
+    local Thrift = require 'Thrift'
+    local TProtocolException = TProtocol.TProtocolException
+    local TTransportBase = TTransport.TTransportBase
+    local TTransportFactoryBase = TTransport.TTransportFactoryBase
+    local ttype = Thrift.ttype
+    local terror = Thrift.terror
+
+
+    local TFramedTransport = TTransportBase:new{
+      __type = 'TFramedTransport',
+      doRead = true,
+      doWrite = true,
+      wBuf = '',
+      rBuf = ''
+    }
+
+    function TFramedTransport:new(obj)
+      if ttype(obj) ~= 'table' then
+        error(ttype(self) .. 'must be initialized with a table')
+      end
+
+      -- Ensure a transport is provided
+      if not obj.trans then
+        error('You must provide ' .. ttype(self) .. ' with a trans')
+      end
+
+      return TTransportBase.new(self, obj)
+    end
+
+    function TFramedTransport:isOpen()
+      return self.trans:isOpen()
+    end
+
+    function TFramedTransport:open()
+      return self.trans:open()
+    end
+
+    function TFramedTransport:close()
+      return self.trans:close()
+    end
+
+    function TFramedTransport:read(len)
+      if string.len(self.rBuf) == 0 then
+        self:__readFrame()
+      end
+
+      if self.doRead == false then
+        return self.trans:read(len)
+      end
+
+      if len > string.len(self.rBuf) then
+        local val = self.rBuf
+        self.rBuf = ''
+        return val
+      end
+
+      local val = string.sub(self.rBuf, 0, len)
+      self.rBuf = string.sub(self.rBuf, len+1)
+      return val
+    end
+
+    function TFramedTransport:__readFrame()
+      local buf = self.trans:readAll(4)
+      local frame_len = libluabpack.bunpack('i', buf)
+      self.rBuf = self.trans:readAll(frame_len)
+    end
+
+
+    function TFramedTransport:write(buf, len)
+      if self.doWrite == false then
+        return self.trans:write(buf, len)
+      end
+
+      if len and len < string.len(buf) then
+        buf = string.sub(buf, 0, len)
+      end
+      self.wBuf = self.wBuf .. buf
+    end
+
+    function TFramedTransport:flush()
+      if self.doWrite == false then
+        return self.trans:flush()
+      end
+
+      -- If the write fails we still want wBuf to be clear
+      local tmp = self.wBuf
+      self.wBuf = ''
+      local frame_len_buf = libluabpack.bpack("i", string.len(tmp))
+      self.trans:write(frame_len_buf)
+      self.trans:write(tmp)
+      self.trans:flush()
+    end
+
+    local TFramedTransportFactory = TTransportFactoryBase:new{
+      __type = 'TFramedTransportFactory'
+    }
+    function TFramedTransportFactory:getTransport(trans)
+      if not trans then
+        terror(TProtocolException:new{
+          message = 'Must supply a transport to ' .. ttype(self)
+        })
+      end
+      return TFramedTransport:new{trans = trans}
+    end
+
+    return TFramedTransport
+  THttpTransport.lua: |
+    --
+    -- Licensed to the Apache Software Foundation (ASF) under one
+    -- or more contributor license agreements. See the NOTICE file
+    -- distributed with this work for additional information
+    -- regarding copyright ownership. The ASF licenses this file
+    -- to you under the Apache License, Version 2.0 (the
+    -- "License"); you may not use this file except in compliance
+    -- with the License. You may obtain a copy of the License at
+    --
+    --   http://www.apache.org/licenses/LICENSE-2.0
+    --
+    -- Unless required by applicable law or agreed to in writing,
+    -- software distributed under the License is distributed on an
+    -- "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+    -- KIND, either express or implied. See the License for the
+    -- specific language governing permissions and limitations
+    -- under the License.
+    --
+
+    local Thrift = require 'Thrift'
+    local TTransport = require 'TTransport'
+    local TProtocol = require 'TProtocol'
+    local TProtocolException = TProtocol.TProtocolException
+    local TTransportBase = TTransport.TTransportBase
+    local TTransportFactoryBase = TTransport.TTransportFactoryBase
+    local ttype = Thrift.ttype
+    local terror = Thrift.terror
+
+    local THttpTransport = TTransportBase:new{
+      __type = 'THttpTransport',
+      path = '/',
+      wBuf = '',
+      rBuf = '',
+      CRLF = '\r\n',
+      VERSION = '0.11.0',
+      isServer = true
+    }
+
+    function THttpTransport:new(obj)
+      if ttype(obj) ~= 'table' then
+        error(ttype(self) .. 'must be initialized with a table')
+      end
+
+      -- Ensure a transport is provided
+      if not obj.trans then
+        error('You must provide ' .. ttype(self) .. ' with a trans')
+      end
+
+      return TTransportBase.new(self, obj)
+    end
+
+    function THttpTransport:isOpen()
+      return self.trans:isOpen()
+    end
+
+    function THttpTransport:open()
+      return self.trans:open()
+    end
+
+    function THttpTransport:close()
+      return self.trans:close()
+    end
+
+    function THttpTransport:readAll(len)
+      return self:read(len)
+    end
+
+    function THttpTransport:read(len)
+      if string.len(self.rBuf) == 0 then
+        self:_readMsg()
+      end
+      if len > string.len(self.rBuf) then
+        local val = self.rBuf
+        self.rBuf = ''
+        return val
+      end
+
+      local val = string.sub(self.rBuf, 0, len)
+      self.rBuf = string.sub(self.rBuf, len+1)
+      return val
+    end
+
+    function THttpTransport:_readMsg()
+      while true do
+        self.rBuf = self.rBuf .. self.trans:read(4)
+        if string.find(self.rBuf, self.CRLF .. self.CRLF) then
+          break
+        end
+      end
+      if not self.rBuf then
+        self.rBuf = ""
+        return
+      end
+      self:getLine()
+      local headers = self:_parseHeaders()
+      if not headers then
+        self.rBuf = ""
+        return
+      end
+
+      local length = tonumber(headers["Content-Length"])
+      if length then
+        length = length - string.len(self.rBuf)
+        self.rBuf = self.rBuf .. self.trans:readAll(length)
+      end
+      if self.rBuf == nil then
+        self.rBuf = ""
+      end
+    end
+
+    function THttpTransport:getLine()
+      local a,b = string.find(self.rBuf, self.CRLF)
+      local line = ""
+      if a and b then
+        line = string.sub(self.rBuf, 0, a-1)
+        self.rBuf = string.sub(self.rBuf, b+1)
+      end
+      return line
+    end
+
+    function THttpTransport:_parseHeaders()
+      local headers = {}
+
+      repeat
+        local line = self:getLine()
+        for key, val in string.gmatch(line, "([%w%-]+)%s*:%s*(.+)") do
+          if headers[key] then
+            local delimiter = ", "
+            if key == "Set-Cookie" then
+              delimiter = "; "
+            end
+            headers[key] = headers[key] .. delimiter .. tostring(val)
+          else
+            headers[key] = tostring(val)
+          end
+        end
+      until string.find(line, "^%s*$")
+
+      return headers
+    end
+
+    function THttpTransport:write(buf, len)
+      if len and len < string.len(buf) then
+        buf = string.sub(buf, 0, len)
+      end
+      self.wBuf = self.wBuf .. buf
+    end
+
+    function THttpTransport:writeHttpHeader(content_len)
+      if self.isServer then
+        local header =  "HTTP/1.1 200 OK" .. self.CRLF
+          .. "Server: Thrift/" .. self.VERSION .. self.CRLF
+          .. "Access-Control-Allow-Origin: *" .. self.CRLF
+          .. "Content-Type: application/x-thrift" .. self.CRLF
+          .. "Content-Length: " .. content_len .. self.CRLF
+          .. "Connection: Keep-Alive" .. self.CRLF .. self.CRLF
+        self.trans:write(header)
+      else
+        local header = "POST " .. self.path .. " HTTP/1.1" .. self.CRLF
+          .. "Host: " .. self.trans.host .. self.CRLF
+          .. "Content-Type: application/x-thrift" .. self.CRLF
+          .. "Content-Length: " .. content_len .. self.CRLF
+          .. "Accept: application/x-thrift " .. self.CRLF
+          .. "User-Agent: Thrift/" .. self.VERSION .. " (Lua/THttpClient)"
+          .. self.CRLF .. self.CRLF
+        self.trans:write(header)
+      end
+    end
+
+    function THttpTransport:flush()
+      -- If the write fails we still want wBuf to be clear
+      local tmp = self.wBuf
+      self.wBuf = ''
+      self:writeHttpHeader(string.len(tmp))
+      self.trans:write(tmp)
+      self.trans:flush()
+    end
+
+    local THttpTransportFactory = TTransportFactoryBase:new{
+      __type = 'THttpTransportFactory'
+    }
+    function THttpTransportFactory:getTransport(trans)
+      if not trans then
+        terror(TProtocolException:new{
+          message = 'Must supply a transport to ' .. ttype(self)
+        })
+      end
+      return THttpTransport:new{trans = trans}
+    end
+  TJsonProtocol.lua: |
+    --
+    -- Licensed to the Apache Software Foundation (ASF) under one
+    -- or more contributor license agreements. See the NOTICE file
+    -- distributed with this work for additional information
+    -- regarding copyright ownership. The ASF licenses this file
+    -- to you under the Apache License, Version 2.0 (the
+    -- "License"), you may not use this file except in compliance
+    -- with the License. You may obtain a copy of the License at
+    --
+    --   http://www.apache.org/licenses/LICENSE-2.0
+    --
+    -- Unless required by applicable law or agreed to in writing,
+    -- software distributed under the License is distributed on an
+    -- "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+    -- KIND, either express or implied. See the License for the
+    -- specific language governing permissions and limitations
+    -- under the License.
+    --
+
+    local Thrift = require 'Thrift'
+    local TProtocol = require 'TProtocol'
+    local libluabpack = require 'libluabpack'
+    local libluabitwise = require 'libluabitwise'
+    local liblualongnumber = require "liblualongnumber"
+
+    local TType = Thrift.TType
+    local __TObject = Thrift.__TObject
+    local TProtocolException = TProtocol.TProtocolException
+    local TProtocolBase = TProtocol.TProtocolBase
+    local TProtocolFactory = TProtocol.TProtocolFactory
+    local ttype = Thrift.ttype
+    local terror = Thrift.terror
+
+    local TJSONProtocol = __TObject.new(TProtocolBase, {
+      __type = 'TJSONProtocol',
+      THRIFT_JSON_PROTOCOL_VERSION = 1,
+      jsonContext = {},
+      jsonContextVal = {first = true, colon = true, ttype = 2, null = true},
+      jsonContextIndex = 1,
+      hasReadByte = ""
+    })
+
+    local TTypeToString = {}
+    TTypeToString[TType.BOOL]   = "tf"
+    TTypeToString[TType.BYTE]   = "i8"
+    TTypeToString[TType.I16]    = "i16"
+    TTypeToString[TType.I32]    = "i32"
+    TTypeToString[TType.I64]    = "i64"
+    TTypeToString[TType.DOUBLE] = "dbl"
+    TTypeToString[TType.STRING] = "str"
+    TTypeToString[TType.STRUCT] = "rec"
+    TTypeToString[TType.LIST]   = "lst"
+    TTypeToString[TType.SET]    = "set"
+    TTypeToString[TType.MAP]    = "map"
+
+    local StringToTType = {
+      tf  = TType.BOOL,
+      i8  = TType.BYTE,
+      i16 = TType.I16,
+      i32 = TType.I32,
+      i64 = TType.I64,
+      dbl = TType.DOUBLE,
+      str = TType.STRING,
+      rec = TType.STRUCT,
+      map = TType.MAP,
+      set = TType.SET,
+      lst = TType.LIST
+    }
+
+    local JSONNode = {
+      ObjectBegin = '{',
+      ObjectEnd = '}',
+      ArrayBegin = '[',
+      ArrayEnd = ']',
+      PairSeparator = ':',
+      ElemSeparator = ',',
+      Backslash = '\\',
+      StringDelimiter = '"',
+      ZeroChar = '0',
+      EscapeChar = 'u',
+      Nan = 'NaN',
+      Infinity = 'Infinity',
+      NegativeInfinity = '-Infinity',
+      EscapeChars = "\"\\bfnrt",
+      EscapePrefix = "\\u00"
+    }
+
+    local EscapeCharVals = {
+      '"', '\\', '\b', '\f', '\n', '\r', '\t'
+    }
+
+    local JSONCharTable = {
+      --0   1   2   3   4   5   6   7   8   9   A   B   C   D   E   F
+        0,  0,  0,  0,  0,  0,  0,  0, 98,116,110,  0,102,114,  0,  0,
+        0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+        1,  1,34,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,
+    }
+
+    -- character table string
+    local b='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+
+    -- encoding
+    local function base64_encode(data)
+      return ((data:gsub('.', function(x)
+        local r,b='',x:byte()
+        for i=8,1,-1 do r=r..(b%2^i-b%2^(i-1)>0 and '1' or '0') end
+        return r;
+      end)..'0000'):gsub('%d%d%d?%d?%d?%d?', function(x)
+        if (#x < 6) then return '' end
+        local c=0
+        for i=1,6 do c=c+(x:sub(i,i)=='1' and 2^(6-i) or 0) end
+        return b:sub(c+1,c+1)
+      end)..({ '', '==', '=' })[#data%3+1])
+    end
+
+    -- decoding
+    local function base64_decode(data)
+      data = string.gsub(data, '[^'..b..'=]', '')
+      return (data:gsub('.', function(x)
+        if (x == '=') then return '' end
+        local r,f='',(b:find(x)-1)
+        for i=6,1,-1 do r=r..(f%2^i-f%2^(i-1)>0 and '1' or '0') end
+        return r;
+      end):gsub('%d%d%d?%d?%d?%d?%d?%d?', function(x)
+        if (#x ~= 8) then return '' end
+        local c=0
+        for i=1,8 do c=c+(x:sub(i,i)=='1' and 2^(8-i) or 0) end
+        return string.char(c)
+      end))
+    end
+
+    function TJSONProtocol:resetContext()
+      self.jsonContext = {}
+      self.jsonContextVal = {first = true, colon = true, ttype = 2, null = true}
+      self.jsonContextIndex = 1
+    end
+
+    function TJSONProtocol:contextPush(context)
+      self.jsonContextIndex = self.jsonContextIndex + 1
+      self.jsonContext[self.jsonContextIndex] = self.jsonContextVal
+      self.jsonContextVal = context
+    end
+
+    function TJSONProtocol:contextPop()
+      self.jsonContextVal = self.jsonContext[self.jsonContextIndex]
+      self.jsonContextIndex = self.jsonContextIndex - 1
+    end
+
+    function TJSONProtocol:escapeNum()
+      if self.jsonContextVal.ttype == 1 then
+        return self.jsonContextVal.colon
+      else
+        return false
+      end
+    end
+
+    function TJSONProtocol:writeElemSeparator()
+      if self.jsonContextVal.null then
+        return
+      end
+      if self.jsonContextVal.first then
+        self.jsonContextVal.first = false
+      else
+        if self.jsonContextVal.ttype == 1 then
+          if self.jsonContextVal.colon then
+            self.trans:write(JSONNode.PairSeparator)
+            self.jsonContextVal.colon = false
+          else
+            self.trans:write(JSONNode.ElemSeparator)
+            self.jsonContextVal.colon = true
+          end
+        else
+          self.trans:write(JSONNode.ElemSeparator)
+        end
+      end
+    end
+
+    function TJSONProtocol:hexChar(val)
+      val = libluabitwise.band(val, 0x0f)
+      if val < 10 then
+        return val + 48
+      else
+        return val + 87
+      end
+    end
+
+    function TJSONProtocol:writeJSONEscapeChar(ch)
+      self.trans:write(JSONNode.EscapePrefix)
+      local outCh = self:hexChar(libluabitwise.shiftr(ch, 4))
+      local buff = libluabpack.bpack('c', outCh)
+      self.trans:write(buff)
+      outCh = self:hexChar(ch)
+      buff = libluabpack.bpack('c', outCh)
+      self.trans:write(buff)
+    end
+
+    function TJSONProtocol:writeJSONChar(byte)
+      local ch = string.byte(byte)
+      if ch >= 0x30 then
+        if ch == JSONNode.Backslash then
+          self.trans:write(JSONNode.Backslash)
+          self.trans:write(JSONNode.Backslash)
+        else
+          self.trans:write(byte)
+        end
+      else
+        local outCh = JSONCharTable[ch+1]
+        if outCh == 1 then
+          self.trans:write(byte)
+        elseif outCh > 1 then
+          self.trans:write(JSONNode.Backslash)
+          local buff = libluabpack.bpack('c', outCh)
+          self.trans:write(buff)
+        else
+          self:writeJSONEscapeChar(ch)
+        end
+      end
+    end
+
+    function TJSONProtocol:writeJSONString(str)
+      self:writeElemSeparator()
+      self.trans:write(JSONNode.StringDelimiter)
+      -- TODO escape special characters
+      local length = string.len(str)
+      local ii = 1
+      while ii <= length do
+        self:writeJSONChar(string.sub(str, ii, ii))
+        ii = ii + 1
+      end
+      self.trans:write(JSONNode.StringDelimiter)
+    end
+
+    function TJSONProtocol:writeJSONBase64(str)
+      self:writeElemSeparator()
+      self.trans:write(JSONNode.StringDelimiter)
+      local length = string.len(str)
+      local offset = 1
+      while length >= 3 do
+        -- Encode 3 bytes at a time
+        local bytes = base64_encode(string.sub(str, offset, offset+3))
+        self.trans:write(bytes)
+        length = length - 3
+        offset = offset + 3
+      end
+      if length > 0 then
+        local bytes = base64_encode(string.sub(str, offset, offset+length))
+        self.trans:write(bytes)
+      end
+      self.trans:write(JSONNode.StringDelimiter)
+    end
+
+    function TJSONProtocol:writeJSONInteger(num)
+      self:writeElemSeparator()
+      if self:escapeNum() then
+        self.trans:write(JSONNode.StringDelimiter)
+      end
+      local numstr = "" .. num
+      numstr = string.sub(numstr, string.find(numstr, "^[+-]?%d+"))
+      self.trans:write(numstr)
+      if self:escapeNum() then
+        self.trans:write(JSONNode.StringDelimiter)
+      end
+    end
+
+    function TJSONProtocol:writeJSONDouble(dub)
+      self:writeElemSeparator()
+      local val = "" .. dub
+      local prefix = string.sub(val, 1, 1)
+      local special = false
+      if prefix == 'N' or prefix == 'n' then
+        val = JSONNode.Nan
+        special = true
+      elseif prefix == 'I' or prefix == 'i' then
+        val = JSONNode.Infinity
+        special = true
+      elseif prefix == '-' then
+        local secondByte = string.sub(val, 2, 2)
+        if secondByte == 'I' or secondByte == 'i' then
+          val = JSONNode.NegativeInfinity
+          special = true
+        end
+      end
+
+      if special or self:escapeNum() then
+        self.trans:write(JSONNode.StringDelimiter)
+      end
+      self.trans:write(val)
+      if special or self:escapeNum() then
+        self.trans:write(JSONNode.StringDelimiter)
+      end
+    end
+
+    function TJSONProtocol:writeJSONObjectBegin()
+      self:writeElemSeparator()
+      self.trans:write(JSONNode.ObjectBegin)
+      self:contextPush({first = true, colon = true, ttype = 1, null = false})
+    end
+
+    function TJSONProtocol:writeJSONObjectEnd()
+      self:contextPop()
+      self.trans:write(JSONNode.ObjectEnd)
+    end
+
+    function TJSONProtocol:writeJSONArrayBegin()
+      self:writeElemSeparator()
+      self.trans:write(JSONNode.ArrayBegin)
+      self:contextPush({first = true, colon = true, ttype = 2, null = false})
+    end
+
+    function TJSONProtocol:writeJSONArrayEnd()
+      self:contextPop()
+      self.trans:write(JSONNode.ArrayEnd)
+    end
+
+    function TJSONProtocol:writeMessageBegin(name, ttype, seqid)
+      self:resetContext()
+      self:writeJSONArrayBegin()
+      self:writeJSONInteger(TJSONProtocol.THRIFT_JSON_PROTOCOL_VERSION)
+      self:writeJSONString(name)
+      self:writeJSONInteger(ttype)
+      self:writeJSONInteger(seqid)
+    end
+
+    function TJSONProtocol:writeMessageEnd()
+      self:writeJSONArrayEnd()
+    end
+
+    function TJSONProtocol:writeStructBegin(name)
+      self:writeJSONObjectBegin()
+    end
+
+    function TJSONProtocol:writeStructEnd()
+      self:writeJSONObjectEnd()
+    end
+
+    function TJSONProtocol:writeFieldBegin(name, ttype, id)
+      self:writeJSONInteger(id)
+      self:writeJSONObjectBegin()
+      self:writeJSONString(TTypeToString[ttype])
+    end
+
+    function TJSONProtocol:writeFieldEnd()
+      self:writeJSONObjectEnd()
+    end
+
+    function TJSONProtocol:writeFieldStop()
+    end
+
+    function TJSONProtocol:writeMapBegin(ktype, vtype, size)
+      self:writeJSONArrayBegin()
+      self:writeJSONString(TTypeToString[ktype])
+      self:writeJSONString(TTypeToString[vtype])
+      self:writeJSONInteger(size)
+      return self:writeJSONObjectBegin()
+    end
+
+    function TJSONProtocol:writeMapEnd()
+      self:writeJSONObjectEnd()
+      self:writeJSONArrayEnd()
+    end
+
+    function TJSONProtocol:writeListBegin(etype, size)
+      self:writeJSONArrayBegin()
+      self:writeJSONString(TTypeToString[etype])
+      self:writeJSONInteger(size)
+    end
+
+    function TJSONProtocol:writeListEnd()
+      self:writeJSONArrayEnd()
+    end
+
+    function TJSONProtocol:writeSetBegin(etype, size)
+      self:writeJSONArrayBegin()
+      self:writeJSONString(TTypeToString[etype])
+      self:writeJSONInteger(size)
+    end
+
+    function TJSONProtocol:writeSetEnd()
+      self:writeJSONArrayEnd()
+    end
+
+    function TJSONProtocol:writeBool(bool)
+      if bool then
+        self:writeJSONInteger(1)
+      else
+        self:writeJSONInteger(0)
+      end
+    end
+
+    function TJSONProtocol:writeByte(byte)
+      local buff = libluabpack.bpack('c', byte)
+      local val = libluabpack.bunpack('c', buff)
+      self:writeJSONInteger(val)
+    end
+
+    function TJSONProtocol:writeI16(i16)
+      local buff = libluabpack.bpack('s', i16)
+      local val = libluabpack.bunpack('s', buff)
+      self:writeJSONInteger(val)
+    end
+
+    function TJSONProtocol:writeI32(i32)
+      local buff = libluabpack.bpack('i', i32)
+      local val = libluabpack.bunpack('i', buff)
+      self:writeJSONInteger(val)
+    end
+
+    function TJSONProtocol:writeI64(i64)
+      local buff = libluabpack.bpack('l', i64)
+      local val = libluabpack.bunpack('l', buff)
+      self:writeJSONInteger(tostring(val))
+    end
+
+    function TJSONProtocol:writeDouble(dub)
+      self:writeJSONDouble(string.format("%.16f", dub))
+    end
+
+    function TJSONProtocol:writeString(str)
+      self:writeJSONString(str)
+    end
+
+    function TJSONProtocol:writeBinary(str)
+      -- Should be utf-8
+      self:writeJSONBase64(str)
+    end
+
+    function TJSONProtocol:readJSONSyntaxChar(ch)
+      local ch2 = ""
+      if self.hasReadByte ~= "" then
+        ch2 = self.hasReadByte
+        self.hasReadByte = ""
+      else
+        ch2 = self.trans:readAll(1)
+      end
+      if ch2 ~= ch then
+        terror(TProtocolException:new{message = "Expected ".. ch .. ", got " .. ch2})
+      end
+    end
+
+    function TJSONProtocol:readElemSeparator()
+      if self.jsonContextVal.null then
+        return
+      end
+      if self.jsonContextVal.first then
+        self.jsonContextVal.first = false
+      else
+        if self.jsonContextVal.ttype == 1 then
+          if self.jsonContextVal.colon then
+            self:readJSONSyntaxChar(JSONNode.PairSeparator)
+            self.jsonContextVal.colon = false
+          else
+            self:readJSONSyntaxChar(JSONNode.ElemSeparator)
+            self.jsonContextVal.colon = true
+          end
+        else
+          self:readJSONSyntaxChar(JSONNode.ElemSeparator)
+        end
+      end
+    end
+
+    function TJSONProtocol:hexVal(ch)
+      local val = string.byte(ch)
+      if val >= 48 and val <= 57 then
+        return val - 48
+      elseif val >= 97 and val <= 102 then
+        return val - 87
+      else
+        terror(TProtocolException:new{message = "Expected hex val ([0-9a-f]); got " .. ch})
+      end
+    end
+
+    function TJSONProtocol:readJSONEscapeChar(ch)
+      self:readJSONSyntaxChar(JSONNode.ZeroChar)
+      self:readJSONSyntaxChar(JSONNode.ZeroChar)
+      local b1 = self.trans:readAll(1)
+      local b2 = self.trans:readAll(1)
+      return libluabitwise.shiftl(self:hexVal(b1), 4) + self:hexVal(b2)
+    end
+
+
+    function TJSONProtocol:readJSONString()
+      self:readElemSeparator()
+      self:readJSONSyntaxChar(JSONNode.StringDelimiter)
+      local result = ""
+      while true do
+        local ch = self.trans:readAll(1)
+        if ch == JSONNode.StringDelimiter then
+          break
+        end
+        if ch == JSONNode.Backslash then
+          ch = self.trans:readAll(1)
+          if ch == JSONNode.EscapeChar then
+            self:readJSONEscapeChar(ch)
+          else
+            local pos, _ = string.find(JSONNode.EscapeChars, ch)
+            if pos == nil then
+              terror(TProtocolException:new{message = "Expected control char, got " .. ch})
+            end
+            ch = EscapeCharVals[pos]
+          end
+        end
+        result = result .. ch
+      end
+      return result
+    end
+
+    function TJSONProtocol:readJSONBase64()
+      local result = self:readJSONString()
+      local length = string.len(result)
+      local str = ""
+      local offset = 1
+      while length >= 4 do
+        local bytes = string.sub(result, offset, offset+4)
+        str = str .. base64_decode(bytes)
+        offset = offset + 4
+        length = length - 4
+      end
+      if length >= 0 then
+        str = str .. base64_decode(string.sub(result, offset, offset + length))
+      end
+      return str
+    end
+
+    function TJSONProtocol:readJSONNumericChars()
+      local result = ""
+      while true do
+        local ch = self.trans:readAll(1)
+        if string.find(ch, '[-+0-9.Ee]') then
+          result = result .. ch
+        else
+          self.hasReadByte = ch
+          break
+        end
+      end
+      return result
+    end
+
+    function TJSONProtocol:readJSONLongInteger()
+      self:readElemSeparator()
+      if self:escapeNum() then
+        self:readJSONSyntaxChar(JSONNode.StringDelimiter)
+      end
+      local result = self:readJSONNumericChars()
+      if self:escapeNum() then
+        self:readJSONSyntaxChar(JSONNode.StringDelimiter)
+      end
+      return result
+    end
+
+    function TJSONProtocol:readJSONInteger()
+      return tonumber(self:readJSONLongInteger())
+    end
+
+    function TJSONProtocol:readJSONDouble()
+      self:readElemSeparator()
+      local delimiter = self.trans:readAll(1)
+      local num = 0.0
+      if delimiter == JSONNode.StringDelimiter then
+        local str = self:readJSONString()
+        if str == JSONNode.Nan then
+          num = 1.0
+        elseif str == JSONNode.Infinity then
+          num = math.maxinteger
+        elseif str == JSONNode.NegativeInfinity then
+          num = math.mininteger
+        else
+          num = tonumber(str)
+        end
+      else
+        if self:escapeNum() then
+          self:readJSONSyntaxChar(JSONNode.StringDelimiter)
+        end
+        local result = self:readJSONNumericChars()
+        num = tonumber(delimiter.. result)
+      end
+      return num
+    end
+
+    function TJSONProtocol:readJSONObjectBegin()
+      self:readElemSeparator()
+      self:readJSONSyntaxChar(JSONNode.ObjectBegin)
+      self:contextPush({first = true, colon = true, ttype = 1, null = false})
+    end
+
+    function TJSONProtocol:readJSONObjectEnd()
+      self:readJSONSyntaxChar(JSONNode.ObjectEnd)
+      self:contextPop()
+    end
+
+    function TJSONProtocol:readJSONArrayBegin()
+      self:readElemSeparator()
+      self:readJSONSyntaxChar(JSONNode.ArrayBegin)
+      self:contextPush({first = true, colon = true, ttype = 2, null = false})
+    end
+
+    function TJSONProtocol:readJSONArrayEnd()
+      self:readJSONSyntaxChar(JSONNode.ArrayEnd)
+      self:contextPop()
+    end
+
+    function TJSONProtocol:readMessageBegin()
+      self:resetContext()
+      self:readJSONArrayBegin()
+      local version = self:readJSONInteger()
+      if version ~= self.THRIFT_JSON_PROTOCOL_VERSION then
+        terror(TProtocolException:new{message = "Message contained bad version."})
+      end
+      local name = self:readJSONString()
+      local ttype = self:readJSONInteger()
+      local seqid = self:readJSONInteger()
+      return name, ttype, seqid
+    end
+
+    function TJSONProtocol:readMessageEnd()
+      self:readJSONArrayEnd()
+    end
+
+    function TJSONProtocol:readStructBegin()
+      self:readJSONObjectBegin()
+      return nil
+    end
+
+    function TJSONProtocol:readStructEnd()
+      self:readJSONObjectEnd()
+    end
+
+    function TJSONProtocol:readFieldBegin()
+      local ttype = TType.STOP
+      local id = 0
+      local ch = self.trans:readAll(1)
+      self.hasReadByte = ch
+      if ch ~= JSONNode.ObjectEnd then
+        id = self:readJSONInteger()
+        self:readJSONObjectBegin()
+        local typeName = self:readJSONString()
+        ttype = StringToTType[typeName]
+      end
+      return nil, ttype, id
+    end
+
+    function TJSONProtocol:readFieldEnd()
+      self:readJSONObjectEnd()
+    end
+
+    function TJSONProtocol:readMapBegin()
+      self:readJSONArrayBegin()
+      local typeName = self:readJSONString()
+      local ktype = StringToTType[typeName]
+      typeName = self:readJSONString()
+      local vtype = StringToTType[typeName]
+      local size = self:readJSONInteger()
+      self:readJSONObjectBegin()
+      return ktype, vtype, size
+    end
+
+    function TJSONProtocol:readMapEnd()
+      self:readJSONObjectEnd()
+      self:readJSONArrayEnd()
+    end
+
+    function TJSONProtocol:readListBegin()
+      self:readJSONArrayBegin()
+      local typeName = self:readJSONString()
+      local etype = StringToTType[typeName]
+      local size = self:readJSONInteger()
+      return etype, size
+    end
+
+    function TJSONProtocol:readListEnd()
+      return self:readJSONArrayEnd()
+    end
+
+    function TJSONProtocol:readSetBegin()
+      return self:readListBegin()
+    end
+
+    function TJSONProtocol:readSetEnd()
+      return self:readJSONArrayEnd()
+    end
+
+    function TJSONProtocol:readBool()
+      local result = self:readJSONInteger()
+      if result == 1 then
+        return true
+      else
+        return false
+      end
+    end
+
+    function TJSONProtocol:readByte()
+      local result = self:readJSONInteger()
+      if result >= 256 then
+        terror(TProtocolException:new{message = "UnExpected Byte " .. result})
+      end
+      return result
+    end
+
+    function TJSONProtocol:readI16()
+      return self:readJSONInteger()
+    end
+
+    function TJSONProtocol:readI32()
+      return self:readJSONInteger()
+    end
+
+    function TJSONProtocol:readI64()
+      local long = liblualongnumber.new
+      return long(self:readJSONLongInteger())
+    end
+
+    function TJSONProtocol:readDouble()
+      return self:readJSONDouble()
+    end
+
+    function TJSONProtocol:readString()
+      return self:readJSONString()
+    end
+
+    function TJSONProtocol:readBinary()
+      return self:readJSONBase64()
+    end
+
+    local TJSONProtocolFactory = TProtocolFactory:new{
+      __type = 'TJSONProtocolFactory',
+    }
+
+    function TJSONProtocolFactory:getProtocol(trans)
+      -- TODO Enforce that this must be a transport class (ie not a bool)
+      if not trans then
+        terror(TProtocolException:new{
+          message = 'Must supply a transport to ' .. ttype(self)
+        })
+      end
+      return TJSONProtocol:new{
+        trans = trans
+      }
+    end
+
+    return TJSONProtocol
+  TMemoryBuffer.lua: |
+    --
+    -- Licensed to the Apache Software Foundation (ASF) under one
+    -- or more contributor license agreements. See the NOTICE file
+    -- distributed with this work for additional information
+    -- regarding copyright ownership. The ASF licenses this file
+    -- to you under the Apache License, Version 2.0 (the
+    -- "License"); you may not use this file except in compliance
+    -- with the License. You may obtain a copy of the License at
+    --
+    --   http://www.apache.org/licenses/LICENSE-2.0
+    --
+    -- Unless required by applicable law or agreed to in writing,
+    -- software distributed under the License is distributed on an
+    -- "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+    -- KIND, either express or implied. See the License for the
+    -- specific language governing permissions and limitations
+    -- under the License.
+    --
+
+    local TTransport = require 'TTransport'
+    local Thrift = require 'Thrift'
+    local TTransportException = TTransport.TTransportException
+    local TTransportBase = TTransport.TTransportBase
+    local terror = Thrift.terror
+
+    local TMemoryBuffer = TTransportBase:new{
+      __type = 'TMemoryBuffer',
+      buffer = '',
+      bufferSize = 1024,
+      wPos = 0,
+      rPos = 0
+    }
+    function TMemoryBuffer:isOpen()
+      return 1
+    end
+    function TMemoryBuffer:open() end
+    function TMemoryBuffer:close() end
+
+    function TMemoryBuffer:peak()
+      return self.rPos < self.wPos
+    end
+
+    function TMemoryBuffer:getBuffer()
+      return self.buffer
+    end
+
+    function TMemoryBuffer:resetBuffer(buf)
+      if buf then
+        self.buffer = buf
+        self.bufferSize = string.len(buf)
+      else
+        self.buffer = ''
+        self.bufferSize = 1024
+      end
+      self.wPos = string.len(buf)
+      self.rPos = 0
+    end
+
+    function TMemoryBuffer:available()
+      return self.wPos - self.rPos
+    end
+
+    function TMemoryBuffer:read(len)
+      local avail = self:available()
+      if avail == 0 then
+        return ''
+      end
+
+      if avail < len then
+        len = avail
+      end
+
+      local val = string.sub(self.buffer, self.rPos + 1, self.rPos + len)
+      self.rPos = self.rPos + len
+      return val
+    end
+
+    function TMemoryBuffer:readAll(len)
+      local avail = self:available()
+
+      if avail < len then
+        local msg = string.format('Attempt to readAll(%d) found only %d available',
+                                  len, avail)
+        terror(TTransportException:new{message = msg})
+      end
+      -- read should block so we don't need a loop here
+      return self:read(len)
+    end
+
+    function TMemoryBuffer:write(buf)
+      self.buffer = self.buffer .. buf
+      self.wPos = self.wPos + string.len(buf)
+    end
+
+    function TMemoryBuffer:flush() end
+  TProtocol.lua: |
+    --
+    -- Licensed to the Apache Software Foundation (ASF) under one
+    -- or more contributor license agreements. See the NOTICE file
+    -- distributed with this work for additional information
+    -- regarding copyright ownership. The ASF licenses this file
+    -- to you under the Apache License, Version 2.0 (the
+    -- "License"); you may not use this file except in compliance
+    -- with the License. You may obtain a copy of the License at
+    --
+    --   http://www.apache.org/licenses/LICENSE-2.0
+    --
+    -- Unless required by applicable law or agreed to in writing,
+    -- software distributed under the License is distributed on an
+    -- "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+    -- KIND, either express or implied. See the License for the
+    -- specific language governing permissions and limitations
+    -- under the License.
+    --
+
+    local Thrift = require 'Thrift'
+    local TType = Thrift.TType
+    local __TObject = Thrift.__TObject
+    local TException = Thrift.TException
+    local ttype = Thrift.ttype
+
+    local TProtocolException = TException:new {
+      UNKNOWN          = 0,
+      INVALID_DATA     = 1,
+      NEGATIVE_SIZE    = 2,
+      SIZE_LIMIT       = 3,
+      BAD_VERSION      = 4,
+      INVALID_PROTOCOL = 5,
+      DEPTH_LIMIT      = 6,
+      errorCode        = 0,
+      __type = 'TProtocolException'
+    }
+    function TProtocolException:__errorCodeToString()
+      if self.errorCode == self.INVALID_DATA then
+        return 'Invalid data'
+      elseif self.errorCode == self.NEGATIVE_SIZE then
+        return 'Negative size'
+      elseif self.errorCode == self.SIZE_LIMIT then
+        return 'Size limit'
+      elseif self.errorCode == self.BAD_VERSION then
+        return 'Bad version'
+      elseif self.errorCode == self.INVALID_PROTOCOL then
+        return 'Invalid protocol'
+      elseif self.errorCode == self.DEPTH_LIMIT then
+        return 'Exceeded size limit'
+      else
+        return 'Default (unknown)'
+      end
+    end
+
+    local TProtocolBase = __TObject:new{
+      __type = 'TProtocolBase',
+      trans
+    }
+
+    function TProtocolBase:new(obj)
+      if ttype(obj) ~= 'table' then
+        error(ttype(self) .. 'must be initialized with a table')
+      end
+
+      -- Ensure a transport is provided
+      if not obj.trans then
+        error('You must provide ' .. ttype(self) .. ' with a trans')
+      end
+
+      return __TObject.new(self, obj)
+    end
+
+    function TProtocolBase:writeMessageBegin(name, ttype, seqid) end
+    function TProtocolBase:writeMessageEnd() end
+    function TProtocolBase:writeStructBegin(name) end
+    function TProtocolBase:writeStructEnd() end
+    function TProtocolBase:writeFieldBegin(name, ttype, id) end
+    function TProtocolBase:writeFieldEnd() end
+    function TProtocolBase:writeFieldStop() end
+    function TProtocolBase:writeMapBegin(ktype, vtype, size) end
+    function TProtocolBase:writeMapEnd() end
+    function TProtocolBase:writeListBegin(ttype, size) end
+    function TProtocolBase:writeListEnd() end
+    function TProtocolBase:writeSetBegin(ttype, size) end
+    function TProtocolBase:writeSetEnd() end
+    function TProtocolBase:writeBool(bool) end
+    function TProtocolBase:writeByte(byte) end
+    function TProtocolBase:writeI16(i16) end
+    function TProtocolBase:writeI32(i32) end
+    function TProtocolBase:writeI64(i64) end
+    function TProtocolBase:writeDouble(dub) end
+    function TProtocolBase:writeString(str) end
+    function TProtocolBase:readMessageBegin() end
+    function TProtocolBase:readMessageEnd() end
+    function TProtocolBase:readStructBegin() end
+    function TProtocolBase:readStructEnd() end
+    function TProtocolBase:readFieldBegin() end
+    function TProtocolBase:readFieldEnd() end
+    function TProtocolBase:readMapBegin() end
+    function TProtocolBase:readMapEnd() end
+    function TProtocolBase:readListBegin() end
+    function TProtocolBase:readListEnd() end
+    function TProtocolBase:readSetBegin() end
+    function TProtocolBase:readSetEnd() end
+    function TProtocolBase:readBool() end
+    function TProtocolBase:readByte() end
+    function TProtocolBase:readI16() end
+    function TProtocolBase:readI32() end
+    function TProtocolBase:readI64() end
+    function TProtocolBase:readDouble() end
+    function TProtocolBase:readString() end
+
+    function TProtocolBase:skip(ttype)
+      if type == TType.STOP then
+        return
+      elseif ttype == TType.BOOL then
+        self:readBool()
+      elseif ttype == TType.BYTE then
+        self:readByte()
+      elseif ttype == TType.I16 then
+        self:readI16()
+      elseif ttype == TType.I32 then
+        self:readI32()
+      elseif ttype == TType.I64 then
+        self:readI64()
+      elseif ttype == TType.DOUBLE then
+        self:readDouble()
+      elseif ttype == TType.STRING then
+        self:readString()
+      elseif ttype == TType.STRUCT then
+        local name = self:readStructBegin()
+        while true do
+          local name, ttype, id = self:readFieldBegin()
+          if ttype == TType.STOP then
+            break
+          end
+          self:skip(ttype)
+          self:readFieldEnd()
+        end
+        self:readStructEnd()
+      elseif ttype == TType.MAP then
+        local kttype, vttype, size = self:readMapBegin()
+        for i = 1, size, 1 do
+          self:skip(kttype)
+          self:skip(vttype)
+        end
+        self:readMapEnd()
+      elseif ttype == TType.SET then
+        local ettype, size = self:readSetBegin()
+        for i = 1, size, 1 do
+          self:skip(ettype)
+        end
+        self:readSetEnd()
+      elseif ttype == TType.LIST then
+        local ettype, size = self:readListBegin()
+        for i = 1, size, 1 do
+          self:skip(ettype)
+        end
+        self:readListEnd()
+      end
+    end
+
+    local TProtocolFactory = __TObject:new{
+      __type = 'TProtocolFactory',
+    }
+    function TProtocolFactory:getProtocol(trans) end
+
+    return {
+      TProtocolException=TProtocolException,
+      TProtocolBase=TProtocolBase,
+      TProtocolFactory=TProtocolFactory
+    }
+  TSocket.lua: |+
+    ---- Licensed to the Apache Software Foundation (ASF) under one
+    -- or more contributor license agreements. See the NOTICE file
+    -- distributed with this work for additional information
+    -- regarding copyright ownership. The ASF licenses this file
+    -- to you under the Apache License, Version 2.0 (the
+    -- "License"); you may not use this file except in compliance
+    -- with the License. You may obtain a copy of the License at
+    --
+    --   http://www.apache.org/licenses/LICENSE-2.0
+    --
+    -- Unless required by applicable law or agreed to in writing,
+    -- software distributed under the License is distributed on an
+    -- "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+    -- KIND, either express or implied. See the License for the
+    -- specific language governing permissions and limitations
+    -- under the License.
+    --
+
+    local TTransport = require 'TTransport'
+    local TTransportException = TTransport.TTransportException
+    local TTransportBase = TTransport.TTransportBase
+    local Thrift = require 'Thrift'
+    local ttype = Thrift.ttype
+    local terror = Thrift.terror
+
+    -- TSocketBase
+    local TSocketBase = TTransportBase:new{
+      __type = 'TSocketBase',
+      timeout = 10000,
+      host = 'localhost',
+      port = 9090,
+      handle
+    }
+
+    function TSocketBase:close()
+      if self.handle then
+        self.handle:close()
+        self.handle = nil
+      end
+    end
+
+    function TSocketBase:setKeepAlive(timeout, size)
+      if self.handle then
+        self.handle:setkeepalive(timeout, size)
+      end
+    end
+
+    -- Returns a table with the fields host and port
+    function TSocketBase:getSocketInfo()
+      if self.handle then
+        return self.handle:getsockinfo()
+      end
+      terror(TTransportException:new{errorCode = TTransportException.NOT_OPEN})
+    end
+
+    function TSocketBase:setTimeout(timeout)
+      if timeout and ttype(timeout) == 'number' then
+        if self.handle then
+          self.handle:settimeout(timeout)
+        end
+        self.timeout = timeout
+      end
+    end
+
+    -- TSocket
+    local TSocket = TSocketBase:new{
+      __type = 'TSocket',
+      host = 'localhost',
+      port = 9090
+    }
+
+    function TSocket:isOpen()
+      if self.handle then
+        return true
+      end
+      return false
+    end
+
+    function TSocket:open()
+      if not self.handle then
+        -- Use NGINX socket instead of the built-in lua socket
+        self.handle = ngx.socket.tcp()
+        self.handle:settimeout(self.timeout)
+      end
+      local ok, err = self.handle:connect(self.host, self.port)
+      if not ok then
+        terror(TTransportException:new{
+          message = 'Could not connect to ' .. self.host .. ':' .. self.port
+            .. ' (' .. err .. ')'
+        })
+      end
+    end
+
+    function TSocket:read(len)
+      local buf = self.handle:receive(len)
+      if not buf or string.len(buf) ~= len then
+        terror(TTransportException:new{errorCode = TTransportException.UNKNOWN})
+      end
+      return buf
+    end
+
+    function TSocket:write(buf)
+      self.handle:send(buf)
+    end
+
+    function TSocket:flush()
+    end
+
+    -- TServerSocket
+    local TServerSocket = TSocketBase:new{
+      __type = 'TServerSocket',
+      host = 'localhost',
+      port = 9090
+    }
+
+    function TServerSocket:listen()
+      if self.handle then
+        self:close()
+      end
+
+      local sock, err = luasocket.create(self.host, self.port)
+      if not err then
+        self.handle = sock
+      else
+        terror(err)
+      end
+      self.handle:settimeout(self.timeout)
+      self.handle:listen()
+    end
+
+
+    function TServerSocket:accept()
+      local client, err = self.handle:accept()
+      if err then
+        terror(err)
+      end
+      return TSocket:new({handle = client})
+    end
+
+    return TSocket
+
+
+  TSocketSSL.lua: |
+    --
+    -- Licensed to the Apache Software Foundation (ASF) under one
+    -- or more contributor license agreements. See the NOTICE file
+    -- distributed with this work for additional information
+    -- regarding copyright ownership. The ASF licenses this file
+    -- to you under the Apache License, Version 2.0 (the
+    -- "License"); you may not use this file except in compliance
+    -- with the License. You may obtain a copy of the License at
+    --
+    --   http://www.apache.org/licenses/LICENSE-2.0
+    --
+    -- Unless required by applicable law or agreed to in writing,
+    -- software distributed under the License is distributed on an
+    -- "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+    -- KIND, either express or implied. See the License for the
+    -- specific language governing permissions and limitations
+    -- under the License.
+    --
+
+    local TSocket = require 'TSocket'
+    local Thrift = require 'Thrift'
+    local TTransport = require 'TTransport'
+    local TTransportException = TTransport.TTransportException
+    local ttype = Thrift.ttype
+    local terror = Thrift.terror
+
+    -- TSocketSSL
+    local TSocketSSL = TSocket:new{
+      __type = 'TSocketSSL',
+      host = 'localhost',
+      port = 9090
+    }
+
+    function TSocketSSL:open()
+      ngx.log(ngx.INFO, "ssl open called")
+      if not self.handle then
+        -- Use NGINX socket instead of the built-in lua socket
+        self.handle = ngx.socket.tcp()
+        self.handle:settimeout(self.timeout)
+      end
+      ngx.log(ngx.INFO, "ssl start to connect")
+      local ok, err = self.handle:connect(self.host, self.port)
+      if not ok then
+        terror(TTransportException:new{
+          message = 'Could not connect to ' .. self.host .. ':' .. self.port
+            .. ' (' .. err .. ')'
+        })
+      end
+      ngx.log(ngx.INFO, "ssl handshake start")
+      local session, err = self.handle:sslhandshake(nil, nil, true)
+      if not session then
+        terror(TTransportException:new{
+          message = 'failed to do hand shake with ' .. self.host .. ':' .. self.port
+            .. ' (' .. err .. ')'
+        })
+      end
+      ngx.log(ngx.INFO, "ssl handshake end")
+    end
+
+    return TSocketSSL
+  TTransport.lua: |
+    --
+    -- Licensed to the Apache Software Foundation (ASF) under one
+    -- or more contributor license agreements. See the NOTICE file
+    -- distributed with this work for additional information
+    -- regarding copyright ownership. The ASF licenses this file
+    -- to you under the Apache License, Version 2.0 (the
+    -- "License"); you may not use this file except in compliance
+    -- with the License. You may obtain a copy of the License at
+    --
+    --   http://www.apache.org/licenses/LICENSE-2.0
+    --
+    -- Unless required by applicable law or agreed to in writing,
+    -- software distributed under the License is distributed on an
+    -- "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+    -- KIND, either express or implied. See the License for the
+    -- specific language governing permissions and limitations
+    -- under the License.
+    --
+
+    local Thrift = require('Thrift')
+    local __TObject = Thrift.__TObject
+    local TException = Thrift.TException
+    local terror = Thrift.terror
+
+    local TTransportException = TException:new {
+      UNKNOWN             = 0,
+      NOT_OPEN            = 1,
+      ALREADY_OPEN        = 2,
+      TIMED_OUT           = 3,
+      END_OF_FILE         = 4,
+      INVALID_FRAME_SIZE  = 5,
+      INVALID_TRANSFORM   = 6,
+      INVALID_CLIENT_TYPE = 7,
+      errorCode        = 0,
+      __type = 'TTransportException'
+    }
+
+    function TTransportException:__errorCodeToString()
+      if self.errorCode == self.NOT_OPEN then
+        return 'Transport not open'
+      elseif self.errorCode == self.ALREADY_OPEN then
+        return 'Transport already open'
+      elseif self.errorCode == self.TIMED_OUT then
+        return 'Transport timed out'
+      elseif self.errorCode == self.END_OF_FILE then
+        return 'End of file'
+      elseif self.errorCode == self.INVALID_FRAME_SIZE then
+        return 'Invalid frame size'
+      elseif self.errorCode == self.INVALID_TRANSFORM then
+        return 'Invalid transform'
+      elseif self.errorCode == self.INVALID_CLIENT_TYPE then
+        return 'Invalid client type'
+      else
+        return 'Default (unknown)'
+      end
+    end
+
+    local TTransportBase = __TObject:new{
+      __type = 'TTransportBase'
+    }
+
+    function TTransportBase:isOpen() end
+    function TTransportBase:open() end
+    function TTransportBase:close() end
+    function TTransportBase:read(len) end
+    function TTransportBase:readAll(len)
+      local buf, have, chunk = '', 0
+      while have < len do
+        chunk = self:read(len - have)
+        have = have + string.len(chunk)
+        buf = buf .. chunk
+
+        if string.len(chunk) == 0 then
+          terror(TTransportException:new{
+            errorCode = TTransportException.END_OF_FILE
+          })
+        end
+      end
+      return buf
+    end
+    function TTransportBase:write(buf) end
+    function TTransportBase:flush() end
+
+    local TServerTransportBase = __TObject:new{
+      __type = 'TServerTransportBase'
+    }
+    function TServerTransportBase:listen() end
+    function TServerTransportBase:accept() end
+    function TServerTransportBase:close() end
+
+    local TTransportFactoryBase = __TObject:new{
+      __type = 'TTransportFactoryBase'
+    }
+    function TTransportFactoryBase:getTransport(trans)
+      return trans
+    end
+
+    return {
+      TTransportException=TTransportException,
+      TTransportBase=TTransportBase,
+      TTransportFactoryBase=TTransportFactoryBase
+    }
+  Thrift.lua: |
+    --
+    -- Licensed to the Apache Software Foundation (ASF) under one
+    -- or more contributor license agreements. See the NOTICE file
+    -- distributed with this work for additional information
+    -- regarding copyright ownership. The ASF licenses this file
+    -- to you under the Apache License, Version 2.0 (the
+    -- "License"); you may not use this file except in compliance
+    -- with the License. You may obtain a copy of the License at
+    --
+    --   http://www.apache.org/licenses/LICENSE-2.0
+    --
+    -- Unless required by applicable law or agreed to in writing,
+    -- software distributed under the License is distributed on an
+    -- "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+    -- KIND, either express or implied. See the License for the
+    -- specific language governing permissions and limitations
+    -- under the License.
+    --
+
+    ---- namespace thrift
+    --thrift = {}
+    --setmetatable(thrift, {__index = _G}) --> perf hit for accessing global methods
+    --setfenv(1, thrift)
+
+    package.cpath = package.cpath .. ';bin/?.so' -- TODO FIX
+    local function ttype(obj)
+      if type(obj) == 'table' and
+        obj.__type and
+        type(obj.__type) == 'string' then
+          return obj.__type
+      end
+      return type(obj)
+    end
+
+    local function terror(e)
+      if e and e.__tostring then
+        error(e:__tostring())
+        return
+      end
+      error(e)
+    end
+
+    local function ttable_size(t)
+      local count = 0
+      for k, v in pairs(t) do
+        count = count + 1
+      end
+      return count
+    end
+
+    local version = 1.0
+
+    local TType = {
+      STOP   = 0,
+      VOID   = 1,
+      BOOL   = 2,
+      BYTE   = 3,
+      I08    = 3,
+      DOUBLE = 4,
+      I16    = 6,
+      I32    = 8,
+      I64    = 10,
+      STRING = 11,
+      UTF7   = 11,
+      STRUCT = 12,
+      MAP    = 13,
+      SET    = 14,
+      LIST   = 15,
+      UTF8   = 16,
+      UTF16  = 17
+    }
+
+    local TMessageType = {
+      CALL  = 1,
+      REPLY = 2,
+      EXCEPTION = 3,
+      ONEWAY = 4
+    }
+
+    -- Recursive __index function to achieve inheritance
+    local function __tobj_index(self, key)
+      local v = rawget(self, key)
+      if v ~= nil then
+        return v
+      end
+
+      local p = rawget(self, '__parent')
+      if p then
+        return __tobj_index(p, key)
+      end
+
+      return nil
+    end
+
+    -- Basic Thrift-Lua Object
+    local __TObject = {
+      __type = '__TObject',
+      __mt = {
+        __index = __tobj_index
+      }
+    }
+    function __TObject:new(init_obj)
+      local obj = {}
+      if ttype(obj) == 'table' then
+        obj = init_obj
+      end
+
+      -- Use the __parent key and the __index function to achieve inheritance
+      obj.__parent = self
+      setmetatable(obj, __TObject.__mt)
+      return obj
+    end
+
+    -- Return a string representation of any lua variable
+    local function thrift_print_r(t)
+      local ret = ''
+      local ltype = type(t)
+      if (ltype == 'table') then
+        ret = ret .. '{ '
+        for key,value in pairs(t) do
+          ret = ret .. tostring(key) .. '=' .. thrift_print_r(value) .. ' '
+        end
+        ret = ret .. '}'
+      elseif ltype == 'string' then
+        ret = ret .. "'" .. tostring(t) .. "'"
+      else
+        ret = ret .. tostring(t)
+      end
+      return ret
+    end
+
+    -- Basic Exception
+    local TException = __TObject:new{
+      message,
+      errorCode,
+      __type = 'TException'
+    }
+    function TException:__tostring()
+      if self.message then
+        return string.format('%s: %s', self.__type, self.message)
+      else
+        local message
+        if self.errorCode and self.__errorCodeToString then
+          message = string.format('%d: %s', self.errorCode, self:__errorCodeToString())
+        else
+          message = thrift_print_r(self)
+        end
+        return string.format('%s:%s', self.__type, message)
+      end
+    end
+
+    -- Thrift[5]
+    local TApplicationException = TException:new{
+      UNKNOWN                 = 0,
+      UNKNOWN_METHOD          = 1,
+      INVALID_MESSAGE_TYPE    = 2,
+      WRONG_METHOD_NAME       = 3,
+      BAD_SEQUENCE_ID         = 4,
+      MISSING_RESULT          = 5,
+      INTERNAL_ERROR          = 6,
+      PROTOCOL_ERROR          = 7,
+      INVALID_TRANSFORM       = 8,
+      INVALID_PROTOCOL        = 9,
+      UNSUPPORTED_CLIENT_TYPE = 10,
+      errorCode               = 0,
+      __type = 'TApplicationException'
+    }
+
+    function TApplicationException:__errorCodeToString()
+      if self.errorCode == self.UNKNOWN_METHOD then
+        return 'Unknown method'
+      elseif self.errorCode == self.INVALID_MESSAGE_TYPE then
+        return 'Invalid message type'
+      elseif self.errorCode == self.WRONG_METHOD_NAME then
+        return 'Wrong method name'
+      elseif self.errorCode == self.BAD_SEQUENCE_ID then
+        return 'Bad sequence ID'
+      elseif self.errorCode == self.MISSING_RESULT then
+        return 'Missing result'
+      elseif self.errorCode == self.INTERNAL_ERROR then
+        return 'Internal error'
+      elseif self.errorCode == self.PROTOCOL_ERROR then
+        return 'Protocol error'
+      elseif self.errorCode == self.INVALID_TRANSFORM then
+        return 'Invalid transform'
+      elseif self.errorCode == self.INVALID_PROTOCOL then
+        return 'Invalid protocol'
+      elseif self.errorCode == self.UNSUPPORTED_CLIENT_TYPE then
+        return 'Unsupported client type'
+      else
+        return 'Default (unknown)'
+      end
+    end
+
+    function TException:read(iprot)
+      iprot:readStructBegin()
+      while true do
+        local fname, ftype, fid = iprot:readFieldBegin()
+        if ftype == TType.STOP then
+          break
+        elseif fid == 1 then
+          if ftype == TType.STRING then
+            self.message = iprot:readString()
+          else
+            iprot:skip(ftype)
+          end
+        elseif fid == 2 then
+          if ftype == TType.I32 then
+            self.errorCode = iprot:readI32()
+          else
+            iprot:skip(ftype)
+          end
+        else
+          iprot:skip(ftype)
+        end
+        iprot:readFieldEnd()
+      end
+      iprot:readStructEnd()
+    end
+
+    function TException:write(oprot)
+      oprot:writeStructBegin('TApplicationException')
+      if self.message then
+        oprot:writeFieldBegin('message', TType.STRING, 1)
+        oprot:writeString(self.message)
+        oprot:writeFieldEnd()
+      end
+      if self.errorCode then
+        oprot:writeFieldBegin('type', TType.I32, 2)
+        oprot:writeI32(self.errorCode)
+        oprot:writeFieldEnd()
+      end
+      oprot:writeFieldStop()
+      oprot:writeStructEnd()
+    end
+
+    -- Basic Client (used in generated lua code)
+    local __TClient = __TObject:new{
+      __type = '__TClient',
+      _seqid = 0
+    }
+    function __TClient:new(obj)
+      if ttype(obj) ~= 'table' then
+        error('TClient must be initialized with a table')
+      end
+
+      -- Set iprot & oprot
+      if obj.protocol then
+        obj.iprot = obj.protocol
+        obj.oprot = obj.protocol
+        obj.protocol = nil
+      elseif not obj.iprot then
+        error('You must provide ' .. ttype(self) .. ' with an iprot')
+      end
+      if not obj.oprot then
+        obj.oprot = obj.iprot
+      end
+
+      return __TObject.new(self, obj)
+    end
+
+    function __TClient:close()
+      self.iprot.trans:close()
+      self.oprot.trans:close()
+    end
+
+    -- Basic Processor (used in generated lua code)
+    local __TProcessor = __TObject:new{
+      __type = '__TProcessor'
+    }
+    function __TProcessor:new(obj)
+      if ttype(obj) ~= 'table' then
+        error('TProcessor must be initialized with a table')
+      end
+
+      -- Ensure a handler is provided
+      if not obj.handler then
+        error('You must provide ' .. ttype(self) .. ' with a handler')
+      end
+
+      return __TObject.new(self, obj)
+    end
+
+    return {
+        TType=TType,
+        TMessageType=TMessageType,
+        __TObject=__TObject,
+        TException=TException,
+        TApplicationException=TApplicationException,
+        __TClient=__TClient,
+        __TProcessor=__TProcessor,
+        ttype=ttype,
+        terror=terror,
+        ttable_size=ttable_size
+    }
+  coding_standards.md: |
+    Please follow [General Coding Standards](/doc/coding_standards.md)
+kind: ConfigMap
+metadata:
+  labels:
+    io.kompose.service: nginx-thrift
+  name: nginx-thrift-cm5

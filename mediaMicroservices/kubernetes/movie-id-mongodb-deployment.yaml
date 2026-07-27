@@ -7,7 +7,6 @@ metadata:
   labels:
     io.kompose.service: movie-id-mongodb
   name: movie-id-mongodb
-  namespace: media
 spec:
   replicas: 1
   selector:

@@ -7,7 +7,6 @@ metadata:
   labels:
     io.kompose.service: cast-info-mongodb
   name: cast-info-mongodb
-  namespace: media
 spec:
   replicas: 1
   selector:

@@ -7,7 +7,6 @@ metadata:
   labels:
     io.kompose.service: user-memcached
   name: user-memcached
-  namespace: media
 spec:
   replicas: 1
   selector:

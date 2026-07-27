@@ -7,7 +7,6 @@ metadata:
   labels:
     io.kompose.service: review-storage-memcached
   name: review-storage-memcached
-  namespace: media
 spec:
   replicas: 1
   selector:

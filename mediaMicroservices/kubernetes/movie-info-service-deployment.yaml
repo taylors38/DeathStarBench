@@ -7,7 +7,6 @@ metadata:
   labels:
     io.kompose.service: movie-info-service
   name: movie-info-service
-  namespace: media
 spec:
   replicas: 1
   selector:

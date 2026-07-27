@@ -45,15 +45,15 @@ spec:
             - mountPath: /gen-lua
               name: nginx-web-server-cm3
             # lua script api
-            - mountPath: /usr/local/openresty/nginx/lua-scripts/wrk2-api/
+            - mountPath: /usr/local/openresty/nginx/lua-scripts/wrk2-api/user
               name: nginx-web-server-user
-            - mountPath: /usr/local/openresty/nginx/lua-scripts/wrk2-api/
+            - mountPath: /usr/local/openresty/nginx/lua-scripts/wrk2-api/plot
               name: nginx-web-server-plot
-            - mountPath: /usr/local/openresty/nginx/lua-scripts/wrk2-api/
+            - mountPath: /usr/local/openresty/nginx/lua-scripts/wrk2-api/review
               name: nginx-web-server-review
-            - mountPath: /usr/local/openresty/nginx/lua-scripts/wrk2-api/
+            - mountPath: /usr/local/openresty/nginx/lua-scripts/wrk2-api/movie
               name: nginx-web-server-movie
-            - mountPath: /usr/local/openresty/nginx/lua-scripts/wrk2-api/
+            - mountPath: /usr/local/openresty/nginx/lua-scripts/wrk2-api/movie-info
               name: nginx-web-server-movie-info
       hostname: nginx-thrift
       restartPolicy: Always

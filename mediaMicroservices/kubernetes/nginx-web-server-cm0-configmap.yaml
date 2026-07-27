@@ -38,4 +38,3 @@ metadata:
   labels:
     io.kompose.service: nginx-web-server
   name: nginx-web-server-cm0
-  namespace: media

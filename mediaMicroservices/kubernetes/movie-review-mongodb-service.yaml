@@ -7,7 +7,6 @@ metadata:
   labels:
     io.kompose.service: movie-review-mongodb
   name: movie-review-mongodb
-  namespace: media
 spec:
   ports:
     - name: "27017"

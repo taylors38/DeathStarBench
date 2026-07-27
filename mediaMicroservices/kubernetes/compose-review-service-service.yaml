@@ -7,7 +7,6 @@ metadata:
   labels:
     io.kompose.service: compose-review-service
   name: compose-review-service
-  namespace: media
 spec:
   ports:
     - name: "9090"

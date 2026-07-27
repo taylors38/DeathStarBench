@@ -7,7 +7,6 @@ metadata:
   labels:
     io.kompose.service: jaeger
   name: jaeger
-  namespace: media
 spec:
   ports:
     - name: "16686"

@@ -33,36 +33,45 @@ spec:
               value: ".media.svc.cluster.local"
           volumeMounts:
             #- mountPath: /usr/local/openresty/nginx/lua-scripts
-            #  name: nginx-web-server-cm0
-            - mountPath: /usr/local/openresty/nginx/lua-scripts
-              name: lua-scripts
-                #- mountPath: /usr/local/openresty/nginx/conf/nginx.conf
-                #  name: nginx-web-server-cm1
-                #  subPath: nginx.conf
+            #  name: lua-scripts
             - mountPath: /usr/local/openresty/nginx/conf/nginx.conf
-              name: nginx-config
+              name: nginx-web-server-cm1
+              subPath: nginx.conf
+            #- mountPath: /usr/local/openresty/nginx/conf/nginx.conf
+            #  name: nginx-config
             - mountPath: /usr/local/openresty/nginx/jaeger-config.json
               name: nginx-web-server-cm2
               subPath: jaeger-config.json
             - mountPath: /gen-lua
               name: nginx-web-server-cm3
+            # lua script api
+            - mountPath: /usr/local/openresty/nginx/lua-scripts/wrk2-api/
+              name: nginx-web-server-user
+            - mountPath: /usr/local/openresty/nginx/lua-scripts/wrk2-api/
+              name: nginx-web-server-plot
+            - mountPath: /usr/local/openresty/nginx/lua-scripts/wrk2-api/
+              name: nginx-web-server-review
+            - mountPath: /usr/local/openresty/nginx/lua-scripts/wrk2-api/
+              name: nginx-web-server-movie
+            - mountPath: /usr/local/openresty/nginx/lua-scripts/wrk2-api/
+              name: nginx-web-server-movie-info
       hostname: nginx-thrift
       restartPolicy: Always
       volumes:
-        - name: lua-scripts
-          hostPath:
-            path: /home/taylor/DeathStarBench/mediaMicroservices/nginx-web-server/lua-scripts
-            type: Directory
-        - name: nginx-config
-          hostPath:
-            path: /home/taylor/DeathStarBench/mediaMicroservices/nginx-web-server/conf/nginx.conf
-            type: File
-              #- configMap:
-              #    items:
-              #      - key: nginx.conf
-              #        path: nginx.conf
-              #    name: nginx-web-server-cm1
-              #  name: nginx-web-server-cm1
+        #- name: lua-scripts
+        #  hostPath:
+        #    path: /home/taylor/DeathStarBench/mediaMicroservices/nginx-web-server/lua-scripts
+        #    type: Directory
+        #- name: nginx-config
+        #  hostPath:
+        #    path: /home/taylor/DeathStarBench/mediaMicroservices/nginx-web-server/conf/nginx.conf
+        #    type: File
+        - configMap:
+            items:
+              - key: nginx.conf
+                path: nginx.conf
+            name: nginx-web-server-cm1
+          name: nginx-web-server-cm1
         - configMap:
             items:
               - key: jaeger-config.json
@@ -72,3 +81,19 @@ spec:
         - configMap:
             name: nginx-web-server-cm3
           name: nginx-web-server-cm3
+        # lua script api
+        - configMap:
+            name : nginx-web-server-user
+          name: nginx-web-server-user
+        - configMap:
+            name : nginx-web-server-plot
+          name: nginx-web-server-plot
+        - configMap:
+            name : nginx-web-server-review
+          name: nginx-web-server-review
+        - configMap:
+            name : nginx-web-server-movie
+          name: nginx-web-server-movie
+        - configMap:
+            name : nginx-web-server-movie-info
+          name: nginx-web-server-movie-info

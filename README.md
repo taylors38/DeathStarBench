@@ -9,18 +9,20 @@ So far, all three applications (hotelReservation, mediaServices, socialNetwork) 
  * The frontend for all services is exposed via a NodePort on port 30080
  * The kubernetes files for this fork are in the kubernetes/ directory
  * All applications deploy to the default namespace
+ * If you edit any configurating or lua scripts you will have to recreate the configmap for it
+ * If you deploy mediaServices or socialNetwork to a namespace other than default you WILL have to update the `fqdn\_suffix` environment variable in the nginx deployment.
 
  The script setup-k8s-cluster.sh is written to ssh into the servers and setup a cluster. It is suppose to be executed off cluster.
  The script reset-k8s-cluster.sh resets kubernetes and cleans up the environment.
 
  These two scipts are highly specific to my environment. You WILL have to edit them for your environment, if you decide to use them.
- The scripts do show how I setup up the cluster and are good reference. I strongly suggest skimming through them if you are creating your own cluster.
+ The scripts do show how I setup the cluster and are good reference. I strongly suggest skimming through them if you are creating your own cluster.
 
  To deploy an application run `kubectl apply -Rf kubernetes/`
+
  To tear down deployment run `kubectl delete -Rf kubernetes/`
 
  The `-R` option is only needed to hotelReservation.
-
 
 # DeathStarBench
 

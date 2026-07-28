@@ -32,8 +32,8 @@ spec:
             - name: fqdn_suffix
               value: ".default.svc.cluster.local"
           volumeMounts:
-            - mountPath: /usr/local/openresty/nginx/lua-scripts
-              name: lua-scripts
+            #- mountPath: /usr/local/openresty/nginx/lua-scripts
+            #  name: lua-scripts
             - mountPath: /usr/local/openresty/nginx/pages
               name: nginx-thrift-cm1
             - mountPath: /usr/local/openresty/nginx/conf/nginx.conf
@@ -46,13 +46,30 @@ spec:
               name: nginx-thrift-cm4
             - mountPath: /usr/local/openresty/lualib/thrift
               name: nginx-thrift-cm5
+            # Lua scripts
+            - mountPath: /usr/local/openresty/nginx/lua-scripts/api/post
+              name: nginx-thrift-api-post
+            - mountPath: /usr/local/openresty/nginx/lua-scripts/api/user
+              name: nginx-thrift-api-user
+            - mountPath: /usr/local/openresty/nginx/lua-scripts/api/user-timeline
+              name: nginx-thrift-api-user-timeline
+            - mountPath: /usr/local/openresty/nginx/lua-scripts/api/home-timeline
+              name: nginx-thrift-api-home-timeline
+            - mountPath: /usr/local/openresty/nginx/lua-scripts/wrk2-api/post
+              name: nginx-thrift-wrk2-api-post
+            - mountPath: /usr/local/openresty/nginx/lua-scripts/wrk2-api/user
+              name: nginx-thrift-wrk2-api-user
+            - mountPath: /usr/local/openresty/nginx/lua-scripts/wrk2-api/user-timeline
+              name: nginx-thrift-wrk2-api-user-timeline
+            - mountPath: /usr/local/openresty/nginx/lua-scripts/wrk2-api/home-timeline
+              name: nginx-thrift-wrk2-api-home-timeline
       hostname: nginx-thrift
       restartPolicy: Always
       volumes:
-        - name: lua-scripts
-          hostPath:
-            path: /home/taylor/DeathStarBench/socialNetwork/nginx-web-server/lua-scripts
-            type: Directory
+        #- name: lua-scripts
+        #  hostPath:
+        #    path: /home/taylor/DeathStarBench/socialNetwork/nginx-web-server/lua-scripts
+        #    type: Directory
         - configMap:
             name: nginx-thrift-cm1
           name: nginx-thrift-cm1
@@ -74,3 +91,28 @@ spec:
         - configMap:
             name: nginx-thrift-cm5
           name: nginx-thrift-cm5
+        # Lua scripts
+        - configMap:
+            name: nginx-thrift-api-post
+          name: nginx-thrift-api-post
+        - configMap:
+            name: nginx-thrift-api-home-timeline
+          name: nginx-thrift-api-home-timeline
+        - configMap:
+            name: nginx-thrift-api-user
+          name: nginx-thrift-api-user
+        - configMap:
+            name: nginx-thrift-api-user-timeline
+          name: nginx-thrift-api-user-timeline
+        - configMap:
+            name: nginx-thrift-wrk2-api-post
+          name: nginx-thrift-wrk2-api-post
+        - configMap:
+            name: nginx-thrift-wrk2-api-home-timeline
+          name: nginx-thrift-wrk2-api-home-timeline
+        - configMap:
+            name: nginx-thrift-wrk2-api-user
+          name: nginx-thrift-wrk2-api-user
+        - configMap:
+            name: nginx-thrift-wrk2-api-user-timeline
+          name: nginx-thrift-wrk2-api-user-timeline
